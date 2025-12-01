@@ -1012,126 +1012,430 @@ def main():
                         'Detail': data['detail']
                     })
                 st.dataframe(pd.DataFrame(hukum_detail), use_container_width=True, hide_index=True)
-
+        
         else:
-            st.info("👈 Silakan lakukan analisis terlebih dahulu di tab **Hasil Analisis**")
-
+            st.info("👈 Silakan isi data di tab **Input Data** dan klik tombol **Analisis & Prediksi**")
+    
     # ==========================================================================
     # TAB 4: PANDUAN
     # ==========================================================================
     with tab4:
-        st.header("ℹ️ PANDUAN PENGGUNAAN SISTEM TAT PREDICTOR")
-
-        with st.expander("🎯 **Tujuan Sistem**", expanded=True):
-            st.markdown("""
-            Sistem ini dirancang sebagai **alat bantu** untuk Tim Asesmen Terpadu (TAT) BNN dalam:
-            - Melakukan asesmen awal terhadap kasus penyalahgunaan narkotika
-            - Memprediksi rekomendasi berdasarkan kriteria hukum dan medis
-            - Membantu pengambilan keputusan rehabilitasi atau proses hukum
-            - Menyediakan dokumentasi digital untuk case conference TAT
-            """)
-
-        with st.expander("📋 **Prosedur Input Data**"):
-            st.markdown("""
-            **Langkah-langkah Input Data:**
-            1. **Asesmen Medis** - Isi informasi dari hasil pemeriksaan medis dan psikologis
-               - Hasil tes urine/laboratorium
-               - Kriteria DSM-5 (11 kriteria kecanduan)
-               - Durasi penggunaan
-               - Fungsi sosial
-               - Kondisi komorbid
-            2. **Asesmen Hukum** - Isi informasi dari hasil penyelidikan
-               - Peran dalam kasus (pengguna/pengedar)
-               - Barang bukti dan jenis narkotika
-               - Status penangkapan
-               - Riwayat pidana
-            3. Klik tombol **Analisis & Prediksi** untuk mendapatkan hasil
-            """)
-
-        with st.expander("⚖️ **Dasar Hukum & Kriteria**"):
-            st.markdown("""
-            **Regulasi yang Digunakan:**
-            - **UU No. 35 Tahun 2009** tentang Narkotika
-            - **SEMA No. 4 Tahun 2010** tentang Rehabilitasi
-            - **Peraturan Bersama 7 Instansi** No. 01/PB/MA/III/2014
-            - **Perka BNN No. 11 Tahun 2014** tentang Asesmen
-            - **DSM-5** untuk diagnosis gangguan penggunaan zat
-
-            **Kriteria SEMA 4/2010 untuk Rehabilitasi:**
-            - Tertangkap tangan
-            - Barang bukti pemakaian 1 hari
-            - Uji laboratorium positif
-            - Tidak terlibat peredaran gelap
-            - Bukan residivis
-            """)
-
-        with st.expander("📊 **Interpretasi Skor**"):
-            st.markdown("""
-            **Skor Asesmen Medis (0-100):**
-            - **0-20**: Kecanduan sangat ringan
-            - **21-50**: Kecanduan ringan-sedang
-            - **51-70**: Kecanduan sedang-berat
-            - **71-100**: Kecanduan sangat berat
-
-            **Skor Asesmen Hukum (0-100):**
-            - **0-20**: Risiko hukum rendah (pengguna murni)
-            - **21-40**: Risiko hukum sedang (pengedar kecil)
-            - **41-60**: Risiko hukum tinggi (pengedar besar)
-            - **61-100**: Risiko hukum sangat tinggi (bandar)
-
-            **Composite Score** = (Skor Medis × 0.6) + (Skor Hukum × 0.4)
-            """)
-
-        with st.expander("🔍 **Jenis Rekomendasi**"):
-            st.markdown("""
-            **Rehabilitasi Rawat Jalan:**
-            - Untuk kasus kecanduan ringan dengan risiko hukum rendah
-            - Masih berfungsi sosial dan produktif
-            - Tidak terlibat peredaran
-
-            **Rehabilitasi Rawat Inap:**
-            - Untuk kasus kecanduan berat
-            - Gangguan fungsi sosial serius
-            - Membutuhkan pengawasan intensif
-
-            **Proses Hukum:**
-            - Untuk kasus terlibat peredaran
-            - Barang bukti melebihi gramatur SEMA
-            - Kecanduan bukan faktor dominan
-
-            **Proses Hukum + Rehabilitasi:**
-            - Dual intervention untuk pecandu berat sekaligus pengedar
-            - Memerlukan penanganan medis dan hukum
-            """)
-
-        with st.expander("⚠️ **Batasan Sistem**"):
-            st.markdown("""
-            **Penting Dipahami:**
-            - Sistem ini **bukan pengganti** keputusan profesional TAT
-            - Hasil hanya **alat bantu** untuk proses asesmen
-            - Harus dikombinasikan dengan **evaluasi klinis mendalam**
-            - Faktor kontekstual spesifik kasus harus dipertimbangkan
-            - Keputusan final tetap di tangan **BNN dan aparat hukum berwenang**
-            """)
-
-        with st.expander("💾 **Export & Dokumentasi**"):
-            st.markdown("""
-            **Fitur Export:**
-            - Hasil analisis dapat di-download dalam format JSON
-            - Data mencakup skor, breakdown, dan reasoning
-            - Cocok untuk dokumentasi case conference TAT
-            - Dapat digunakan untuk audit dan evaluasi program
-            """)
-
-        st.markdown("---")
+        st.header("ℹ️ PANDUAN PENGGUNAAN SISTEM")
+        
+        # Penjelasan Umum
         st.markdown("""
+        ### 📖 Tentang Sistem TAT Predictor
+        
+        Sistem ini dirancang sebagai **alat bantu** untuk Tim Asesmen Terpadu (TAT) dalam 
+        melakukan asesmen terhadap tersangka/terdakwa penyalahguna narkotika. Sistem menggunakan 
+        pendekatan **rule-based scoring** yang transparan dan dapat dipertanggungjawabkan.
+        """)
+        
+        st.markdown("---")
+        
+        # Dasar Hukum
+        with st.expander("⚖️ DASAR HUKUM & REGULASI", expanded=True):
+            st.markdown("""
+            #### Landasan Hukum:
+            
+            1. **UU No. 35 Tahun 2009** tentang Narkotika
+               - Pasal 54: Kewajiban rehab untuk pecandu
+               - Pasal 103: Hakim dapat menetapkan rehabilitasi
+               - Pasal 127: Penyalahguna dapat direhabilitasi
+            
+            2. **SEMA No. 4 Tahun 2010**
+               - Kriteria penempatan ke lembaga rehabilitasi
+               - Gramatur maksimal per jenis narkotika
+            
+            3. **Peraturan Bersama 7 Instansi (2014)**
+               - Tata cara penanganan pecandu narkotika
+               - Prosedur asesmen terpadu
+            
+            4. **Perka BNN No. 11 Tahun 2014**
+               - Tata cara penanganan tersangka pecandu
+               - Mekanisme TAT
+            
+            #### Instrumen Asesmen Internasional:
+            
+            - **ASAM** (American Society of Addiction Medicine) - 6 Dimensi
+            - **DSM-5** - 11 Kriteria Gangguan Penggunaan Zat
+            - **ASSIST** (Alcohol, Smoking and Substance Involvement Screening Test)
+            - **DAST-10** (Drug Abuse Screening Test)
+            - **ASI** (Addiction Severity Index)
+            """)
+        
+        # Kriteria SEMA
+        with st.expander("📏 KRITERIA SEMA 4/2010 (Gramatur Narkotika)", expanded=False):
+            st.markdown("""
+            #### Gramatur Maksimal untuk Rehabilitasi:
+            
+            Berdasarkan SEMA No. 4 Tahun 2010, berikut adalah batas maksimal barang bukti 
+            yang dapat dipertimbangkan untuk rehabilitasi:
+            """)
+            
+            gramatur_df = pd.DataFrame({
+                'Jenis Narkotika': list(GRAMATUR_LIMITS.keys()),
+                'Batas Maksimal': [f"≤ {v}g" for v in GRAMATUR_LIMITS.values()],
+                'Catatan': [
+                    'Untuk ganja kering/daun',
+                    'Kristal metamfetamin',
+                    'Heroin/putaw dalam bentuk murni',
+                    'Kokain murni',
+                    'Tablet ekstasi @ 0,3g = 8 butir',
+                    'Morfin dalam bentuk murni',
+                    'Kodein dalam bentuk tablet',
+                    'Disesuaikan dengan jenis'
+                ]
+            })
+            
+            st.dataframe(gramatur_df, use_container_width=True, hide_index=True)
+            
+            st.warning("""
+            ⚠️ **PENTING:** Gramatur di atas adalah **pedoman umum**. Hakim tetap memiliki 
+            kewenangan untuk mempertimbangkan faktor-faktor lain dalam memutuskan rehabilitasi.
+            """)
+        
+        # Kriteria DSM-5
+        with st.expander("🧠 KRITERIA DSM-5 (Gangguan Penggunaan Zat)", expanded=False):
+            st.markdown("""
+            #### 11 Kriteria Diagnostik DSM-5:
+            
+            Sistem DSM-5 menggunakan 11 kriteria untuk mendiagnosis gangguan penggunaan zat.
+            Tingkat keparahan ditentukan berdasarkan jumlah kriteria yang terpenuhi:
+            """)
+            
+            for i, criteria in enumerate(DSM5_CRITERIA, 1):
+                st.markdown(f"{i}. {criteria}")
+            
+            st.markdown("""
+            #### Interpretasi Tingkat Keparahan:
+            
+            - **0-1 kriteria**: Tidak ada gangguan
+            - **2-3 kriteria**: Gangguan Penggunaan **RINGAN** (Mild)
+            - **4-5 kriteria**: Gangguan Penggunaan **SEDANG** (Moderate)
+            - **6+ kriteria**: Gangguan Penggunaan **BERAT** (Severe)
+            
+            Semakin banyak kriteria yang terpenuhi, semakin berat tingkat kecanduan
+            dan semakin mendesak kebutuhan untuk rehabilitasi intensif.
+            """)
+        
+        # ASAM 6 Dimensi
+        with st.expander("🏥 ASAM 6 DIMENSI", expanded=False):
+            st.markdown("""
+            #### American Society of Addiction Medicine (ASAM) Criteria:
+            
+            ASAM menggunakan 6 dimensi untuk menilai tingkat keparahan dan menentukan 
+            level perawatan yang tepat:
+            
+            1. **Dimensi 1**: Intoxication Akut dan/atau Potensi Withdrawal
+               - Gejala fisik penggunaan atau putus zat
+               - Risiko komplikasi medis
+            
+            2. **Dimensi 2**: Kondisi dan Komplikasi Biomedis
+               - Penyakit fisik yang menyertai
+               - Kebutuhan perawatan medis
+            
+            3. **Dimensi 3**: Kondisi Emosional, Behavioral, Kognitif
+               - Gangguan mental komorbid
+               - Risiko bunuh diri atau membahayakan orang lain
+            
+            4. **Dimensi 4**: Kesiapan untuk Berubah
+               - Motivasi untuk pulih
+               - Resistensi terhadap perawatan
+            
+            5. **Dimensi 5**: Potensi Relapse, Continued Use, atau Continued Problem
+               - Riwayat relapse sebelumnya
+               - Faktor risiko kambuh
+            
+            6. **Dimensi 6**: Lingkungan Pemulihan/Hidup
+               - Dukungan sosial dan keluarga
+               - Lingkungan yang kondusif untuk pemulihan
+            
+            #### Level Perawatan ASAM:
+            
+            - **Level 0.5**: Intervensi awal
+            - **Level 1**: Rawat jalan (outpatient)
+            - **Level 2**: Intensive outpatient / Partial hospitalization
+            - **Level 3**: Residential / Inpatient
+            - **Level 4**: Medically-managed intensive inpatient
+            """)
+        
+        st.markdown("---")
+        
+        # Cara Penggunaan
+        with st.expander("📝 CARA PENGGUNAAN SISTEM", expanded=True):
+            st.markdown("""
+            ### Langkah-langkah Penggunaan:
+            
+            #### 1. **Persiapan Data**
+            Kumpulkan semua informasi yang diperlukan:
+            - Hasil tes urine/laboratorium
+            - Hasil wawancara klinis (untuk kriteria DSM-5)
+            - Data durasi penggunaan
+            - Penilaian fungsi sosial/okupasional
+            - Informasi komorbid (jika ada)
+            - Data barang bukti dan peran dalam kasus
+            - Status penangkapan
+            - Riwayat pidana/rehabilitasi
+            
+            #### 2. **Input Data di Tab "Input Data"**
+            
+            **Bagian Asesmen Medis:**
+            - Pilih zat yang terdeteksi positif (bisa multiple)
+            - Centang kriteria DSM-5 yang terpenuhi berdasarkan wawancara
+            - Input durasi penggunaan dalam bulan
+            - Pilih status fungsi sosial saat ini
+            - Tandai jika ada gangguan komorbid dan tingkat keparahannya
+            
+            **Bagian Asesmen Hukum:**
+            - Pilih peran tersangka dalam kasus
+            - Input jenis dan jumlah barang bukti (dalam gram)
+            - Pilih status penangkapan
+            - Pilih riwayat pidana/rehabilitasi
+            
+            #### 3. **Klik "Analisis & Prediksi"**
+            Sistem akan:
+            - Menghitung skor medis (0-100)
+            - Menghitung skor hukum (0-100)
+            - Menerapkan decision rules
+            - Menghasilkan probabilitas untuk setiap rekomendasi
+            
+            #### 4. **Review Hasil di Tab "Hasil Analisis"**
+            Lihat:
+            - Rekomendasi utama dengan tingkat keyakinan
+            - Alasan dan pertimbangan
+            - Distribusi probabilitas
+            - Export data jika diperlukan
+            
+            #### 5. **Analisis Lebih Dalam di Tab "Visualisasi Detail"**
+            Explore:
+            - Gauge chart untuk skor keseluruhan
+            - Breakdown detail per kategori
+            - Perbandingan komponen skor
+            
+            #### 6. **Case Conference**
+            - Gunakan hasil sebagai bahan diskusi TAT
+            - Pertimbangkan faktor kontekstual lain
+            - Tim TAT membuat keputusan final
+            """)
+        
+        # Interpretasi Hasil
+        with st.expander("🔍 INTERPRETASI HASIL", expanded=False):
+            st.markdown("""
+            ### Memahami Output Sistem:
+            
+            #### 1. **Skor Asesmen Medis (0-100)**
+            - **0-30**: Penggunaan ringan, fungsi masih baik
+            - **31-60**: Kecanduan moderate, perlu intervensi
+            - **61-100**: Kecanduan severe, butuh rehabilitasi intensif
+            
+            #### 2. **Skor Asesmen Hukum (0-100)**
+            - **0-20**: Pengguna murni, tidak ada keterlibatan peredaran
+            - **21-40**: Ada indikasi sharing atau keterlibatan ringan
+            - **41-60**: Terlibat peredaran skala kecil-menengah
+            - **61-100**: Keterlibatan peredaran signifikan/bandar
+            
+            #### 3. **Composite Score**
+            Perhitungan: `(Skor Medis × 0.6) + (Skor Hukum × 0.4)`
+            - Bobot medis lebih besar (60%) karena fokus pada aspek kesehatan
+            - Bobot hukum 40% untuk mempertimbangkan aspek penegakan hukum
+            
+            #### 4. **Rekomendasi yang Mungkin:**
+            
+            **A. Rehabilitasi Rawat Jalan**
+            - Cocok untuk: Kecanduan ringan-sedang, masih produktif
+            - Frekuensi: 2-3x seminggu, bisa sambil kerja/sekolah
+            - Durasi: 3-6 bulan (bisa diperpanjang)
+            
+            **B. Rehabilitasi Rawat Inap**
+            - Cocok untuk: Kecanduan berat, tidak berfungsi sosial
+            - Program: Detox + terapi intensif 24/7
+            - Durasi: 3-12 bulan tergantung keparahan
+            
+            **C. Proses Hukum**
+            - Untuk: Terlibat peredaran, barang bukti besar
+            - Tidak dominan aspek kecanduan
+            - Fokus pada aspek penegakan hukum
+            
+            **D. Proses Hukum + Rehabilitasi (Dual Intervention)**
+            - Untuk: Pecandu berat yang juga terlibat peredaran
+            - Perlu menjalani rehabilitasi DAN proses hukum
+            - Pasal 103 UU 35/2009: Hakim dapat memerintahkan rehab sambil menjalani pidana
+            
+            #### 5. **Tingkat Keyakinan (Confidence Level)**
+            - **75-100%**: Rekomendasi sangat kuat
+            - **60-74%**: Rekomendasi kuat, perlu validasi tambahan
+            - **<60%**: Perlu evaluasi mendalam, kasus borderline
+            """)
+        
+        # Keterbatasan Sistem
+        with st.expander("⚠️ KETERBATASAN & DISCLAIMER", expanded=False):
+            st.markdown("""
+            ### Keterbatasan Sistem:
+            
+            #### Sistem INI TIDAK DAPAT:
+            
+            ❌ **Menggantikan penilaian klinis profesional**
+            - Dokter, psikolog, dan penegak hukum tetap yang menentukan
+            
+            ❌ **Menangkap nuansa kasus individual**
+            - Setiap kasus memiliki konteks unik
+            - Faktor budaya, keluarga, trauma tidak tercakup
+            
+            ❌ **Memprediksi masa depan dengan pasti**
+            - Hasil rehabilitasi dipengaruhi banyak faktor
+            - Motivasi individu sangat menentukan
+            
+            ❌ **Menggantikan keputusan hakim**
+            - Hakim memiliki kewenangan penuh
+            - Sistem hanya memberikan rekomendasi teknis
+            
+            #### Sistem INI HANYA:
+            
+            ✅ **Alat bantu** untuk strukturisasi data
+            ✅ **Referensi** untuk diskusi tim
+            ✅ **Dokumentasi** sistematis asesmen
+            ✅ **Basis** untuk case conference
+            
+            ### Disclaimer:
+            
+            1. **Tidak Mengikat Secara Hukum**
+               - Output sistem bersifat rekomendatif
+               - Keputusan final ada pada otoritas berwenang
+            
+            2. **Perlu Validasi Profesional**
+               - Setiap kasus harus direview oleh tim TAT
+               - Pertimbangkan faktor lain yang tidak tercakup
+            
+            3. **Update Berkala Diperlukan**
+               - Regulasi bisa berubah
+               - Sistem perlu disesuaikan dengan perkembangan hukum
+            
+            4. **Akurasi Tergantung Input**
+               - "Garbage in, garbage out"
+               - Pastikan data yang diinput akurat dan lengkap
+            
+            5. **Tidak untuk Screening Massal**
+               - Sistem dirancang untuk asesmen individual mendalam
+               - Bukan untuk screening cepat dalam jumlah besar
+            """)
+        
+        # FAQ
+        with st.expander("❓ FREQUENTLY ASKED QUESTIONS (FAQ)", expanded=False):
+            st.markdown("""
+            ### Pertanyaan yang Sering Diajukan:
+            
+            **Q1: Apakah sistem ini menggantikan peran TAT?**
+            
+            A: **TIDAK**. Sistem ini hanya alat bantu. Keputusan final tetap ada pada 
+            Tim Asesmen Terpadu yang terdiri dari profesional kesehatan dan penegak hukum.
+            
+            ---
+            
+            **Q2: Bagaimana jika hasil sistem berbeda dengan penilaian tim?**
+            
+            A: Penilaian tim TAT **SELALU lebih prioritas**. Sistem mungkin tidak menangkap 
+            faktor-faktor kontekstual yang penting. Gunakan hasil sistem sebagai salah satu 
+            pertimbangan, bukan kebenaran mutlak.
+            
+            ---
+            
+            **Q3: Apakah gramatur SEMA 4/2010 masih berlaku?**
+            
+            A: Ya, SEMA 4/2010 masih menjadi pedoman, namun hakim memiliki kewenangan 
+            untuk mempertimbangkan faktor lain. Sistem ini menggunakan gramatur tersebut 
+            sebagai referensi awal.
+            
+            ---
+            
+            **Q4: Bagaimana jika tersangka positif multiple substances?**
+            
+            A: Pilih semua zat yang terdeteksi positif. Sistem akan memberikan skor lebih 
+            tinggi untuk polisubstansi (≥4 zat) karena menunjukkan tingkat keparahan yang lebih tinggi.
+            
+            ---
+            
+            **Q5: Apa bedanya rawat jalan vs rawat inap?**
+            
+            A: 
+            - **Rawat Jalan**: Datang ke fasilitas rehab 2-3x/minggu, bisa sambil bekerja/sekolah. 
+              Cocok untuk kecanduan ringan-sedang dengan dukungan keluarga kuat.
+            - **Rawat Inap**: Tinggal di fasilitas rehab 24/7. Untuk kecanduan berat, 
+              komorbid serius, atau lingkungan rumah tidak mendukung.
+            
+            ---
+            
+            **Q6: Bagaimana dengan kasus first offender tapi barang bukti besar?**
+            
+            A: Sistem akan memberikan skor hukum tinggi karena barang bukti. Meskipun 
+            first offender, jika barang bukti jauh melebihi gramatur SEMA, indikasi 
+            peredaran lebih kuat. Tim TAT perlu evaluasi mendalam untuk kasus seperti ini.
+            
+            ---
+            
+            **Q7: Apakah sistem ini bisa digunakan untuk asesmen mandiri?**
+            
+            A: Sistem dirancang untuk **profesional** (dokter, psikolog, penyidik, jaksa). 
+            Tidak disarankan untuk asesmen mandiri karena perlu keahlian untuk interpretasi 
+            hasil dan pengambilan keputusan.
+            
+            ---
+            
+            **Q8: Bagaimana cara update kriteria jika ada perubahan regulasi?**
+            
+            A: Sistem rule-based ini mudah diupdate. Cukup modifikasi parameter scoring 
+            dan decision rules di kode. Tidak perlu retraining seperti sistem AI/ML.
+            
+            ---
+            
+            **Q9: Apakah data yang diinput disimpan?**
+            
+            A: Sistem ini **TIDAK menyimpan** data secara otomatis ke server. Data hanya 
+            ada di session browser. Anda bisa export hasil analisis dalam format JSON 
+            untuk dokumentasi internal.
+            
+            ---
+            
+            **Q10: Sistem ini bisa digunakan untuk kasus anak/remaja?**
+            
+            A: Kriteria umum bisa digunakan, tapi untuk anak/remaja perlu pertimbangan 
+            khusus sesuai UU Perlindungan Anak dan sistem peradilan anak. Konsultasikan 
+            dengan ahli hukum anak dan psikolog anak.
+            """)
+        
+        st.markdown("---")
+        
+        # Kontak & Referensi
+        st.markdown("""
+        ### 📚 REFERENSI & SUMBER:
+        
+        1. UU No. 35 Tahun 2009 tentang Narkotika
+        2. SEMA No. 4 Tahun 2010
+        3. Peraturan Bersama 7 Instansi No. 01/PB/MA/III/2014
+        4. Perka BNN No. 11 Tahun 2014
+        5. DSM-5 (Diagnostic and Statistical Manual of Mental Disorders, 5th Edition)
+        6. ASAM Criteria (American Society of Addiction Medicine)
+        7. WHO ASSIST (Alcohol, Smoking and Substance Involvement Screening Test)
+        
+        ### 📞 INFORMASI KONTAK:
+        
+        - **Hotline BNN**: 184
+        - **Website BNN**: https://bnn.go.id
+        - **IPWL BNN**: https://ipwl.bnn.go.id (Informasi Pusat Layanan)
+        
+        ---
+        
         <div class="info-box">
-            <strong>💡 TIPS PENGGUNAAN:</strong><br>
-            Gunakan sistem ini sebagai <strong>starting point</strong> untuk diskusi TAT.<br>
-            Gabungkan dengan <strong>penilaian klinis dan hukum profesional</strong>.<br>
-            Catat semua asumsi dan batasan dalam proses dokumentasi kasus.
+        <strong>💡 TIPS:</strong><br>
+        Gunakan sistem ini sebagai bagian dari proses asesmen komprehensif. 
+        Kombinasikan dengan wawancara mendalam, observasi klinis, dan pertimbangan 
+        kontekstual untuk menghasilkan rekomendasi terbaik bagi klien.
         </div>
         """, unsafe_allow_html=True)
+
+# =============================================================================
+# JALANKAN APLIKASI
+# =============================================================================
 
 if __name__ == "__main__":
     main()
