@@ -21,6 +21,16 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 import json
+from io import BytesIO
+
+# Import library PDF
+try:
+    from reportlab.lib.pagesizes import A4
+    from reportlab.pdfgen import canvas
+    from reportlab.lib import colors
+    from reportlab.lib.units import cm
+except ImportError:
+    st.error("Library 'reportlab' belum terinstall. Mohon install dengan `pip install reportlab`")
 
 # =============================================================================
 # KONFIGURASI HALAMAN
@@ -125,16 +135,9 @@ DSM5_CRITERIA = [
 # =============================================================================
 
 def calculate_medical_score(zat_positif, dsm5_count, durasi_bulan, 
-                           fungsi_sosial, ada_komorbid, tingkat_komorbid):
+                            fungsi_sosial, ada_komorbid, tingkat_komorbid):
     """
     Menghitung Skor Asesmen Medis (0-100 poin)
-    
-    Komponen:
-    1. Hasil Tes Urine (0-25 poin)
-    2. Tingkat Kecanduan DSM-5 (0-30 poin)
-    3. Durasi Penggunaan (0-15 poin)
-    4. Dampak Fungsi Sosial (0-15 poin)
-    5. Kondisi Komorbid (0-15 poin)
     """
     score = 0
     breakdown = {}
@@ -232,15 +235,9 @@ def calculate_medical_score(zat_positif, dsm5_count, durasi_bulan,
     return score, breakdown
 
 def calculate_legal_score(peran, barang_bukti, jenis_narkotika, 
-                         status_tangkap, riwayat_pidana):
+                          status_tangkap, riwayat_pidana):
     """
     Menghitung Skor Asesmen Hukum (0-100 poin)
-    
-    Komponen:
-    1. Keterlibatan Jaringan Peredaran (0-40 poin)
-    2. Barang Bukti vs Gramatur SEMA (0-25 poin)
-    3. Status Penangkapan (0-15 poin)
-    4. Riwayat Pidana (0-20 poin)
     """
     score = 0
     breakdown = {}
@@ -316,11 +313,6 @@ def calculate_legal_score(peran, barang_bukti, jenis_narkotika,
 def apply_decision_rules(skor_medis, skor_hukum, breakdown_medis, breakdown_hukum):
     """
     Menerapkan Decision Rules untuk menghasilkan probabilitas rekomendasi
-    
-    Berdasarkan:
-    - SEMA 4/2010
-    - Kriteria TAT BNN
-    - Best practices rehabilitasi
     """
     # Composite Score dengan bobot
     final_score = (skor_medis * 0.6) + (skor_hukum * 0.4)
@@ -336,12 +328,10 @@ def apply_decision_rules(skor_medis, skor_hukum, breakdown_medis, breakdown_huku
     reasoning = []
     primary_recommendation = ""
     
-    # ==========================================================================
     # RULE 1: REHABILITASI RAWAT JALAN
-    # ==========================================================================
-    if (20 <= skor_medis <= 50 and  # Kecanduan ringan-sedang
-        skor_hukum <= 20 and         # Pengguna murni atau sharing minimal
-        breakdown_medis['Fungsi Sosial']['skor'] <= 8):  # Masih produktif
+    if (20 <= skor_medis <= 50 and 
+        skor_hukum <= 20 and 
+        breakdown_medis['Fungsi Sosial']['skor'] <= 8):
         
         probabilities["Rehabilitasi Rawat Jalan"] = 85
         reasoning.append("✓ Tingkat kecanduan ringan-sedang (20-50 poin)")
@@ -350,11 +340,9 @@ def apply_decision_rules(skor_medis, skor_hukum, breakdown_medis, breakdown_huku
         reasoning.append("✓ Sesuai kriteria rawat jalan")
         primary_recommendation = "Rehabilitasi Rawat Jalan"
     
-    # ==========================================================================
     # RULE 2: REHABILITASI RAWAT INAP
-    # ==========================================================================
-    elif (skor_medis > 50 and       # Kecanduan berat
-          skor_hukum <= 25 and      # Pengguna atau pengedar sangat kecil
+    elif (skor_medis > 50 and 
+          skor_hukum <= 25 and 
           (breakdown_medis['Fungsi Sosial']['skor'] >= 8 or 
            breakdown_medis['Komorbid']['skor'] >= 8)):
         
@@ -365,12 +353,10 @@ def apply_decision_rules(skor_medis, skor_hukum, breakdown_medis, breakdown_huku
         reasoning.append("✓ Tidak ada bukti penjualan/peredaran besar")
         primary_recommendation = "Rehabilitasi Rawat Inap"
     
-    # ==========================================================================
     # RULE 3: PROSES HUKUM
-    # ==========================================================================
-    elif (skor_hukum > 40 and       # Pengedar/bandar
+    elif (skor_hukum > 40 and 
           breakdown_hukum['Barang Bukti']['skor'] >= 18 and
-          skor_medis < 40):         # Kecanduan tidak dominan
+          skor_medis < 40):
         
         probabilities["Proses Hukum"] = 75
         reasoning.append("✗ Indikasi kuat keterlibatan peredaran")
@@ -379,11 +365,9 @@ def apply_decision_rules(skor_medis, skor_hukum, breakdown_medis, breakdown_huku
         reasoning.append("✗ Memenuhi kriteria tindak pidana peredaran")
         primary_recommendation = "Proses Hukum"
     
-    # ==========================================================================
-    # RULE 4: PROSES HUKUM + REHABILITASI (DUAL INTERVENTION)
-    # ==========================================================================
-    elif (skor_medis > 50 and       # Pecandu berat
-          skor_hukum > 30):         # Terlibat peredaran
+    # RULE 4: PROSES HUKUM + REHABILITASI
+    elif (skor_medis > 50 and 
+          skor_hukum > 30):
         
         probabilities["Proses Hukum + Rehabilitasi"] = 85
         reasoning.append("! Pecandu berat dengan ketergantungan severe")
@@ -393,12 +377,9 @@ def apply_decision_rules(skor_medis, skor_hukum, breakdown_medis, breakdown_huku
         reasoning.append("  → Proses hukum untuk aspek peredaran")
         primary_recommendation = "Proses Hukum + Rehabilitasi"
     
-    # ==========================================================================
-    # EDGE CASES & REFINEMENT
-    # ==========================================================================
+    # EDGE CASES
     else:
-        # Default berdasarkan dominasi skor
-        if skor_medis > skor_hukum * 1.5:  # Medis sangat dominan
+        if skor_medis > skor_hukum * 1.5:
             if skor_medis > 60:
                 probabilities["Rehabilitasi Rawat Inap"] = 70
                 primary_recommendation = "Rehabilitasi Rawat Inap"
@@ -408,36 +389,145 @@ def apply_decision_rules(skor_medis, skor_hukum, breakdown_medis, breakdown_huku
                 primary_recommendation = "Rehabilitasi Rawat Jalan"
                 reasoning.append("✓ Aspek medis dominan (moderate addiction)")
         
-        elif skor_hukum > skor_medis * 1.5:  # Hukum sangat dominan
+        elif skor_hukum > skor_medis * 1.5:
             probabilities["Proses Hukum"] = 70
             primary_recommendation = "Proses Hukum"
             reasoning.append("✗ Aspek hukum sangat dominan")
         
-        else:  # Balanced - perlu evaluasi lebih lanjut
+        else:
             probabilities["Proses Hukum + Rehabilitasi"] = 60
             primary_recommendation = "Proses Hukum + Rehabilitasi"
             reasoning.append("! Skor medis dan hukum relatif seimbang")
             reasoning.append("! Perlu evaluasi mendalam Tim Asesmen Terpadu")
     
-    # Tambahkan reasoning tambahan berdasarkan SEMA 4/2010
     if breakdown_hukum['Barang Bukti']['skor'] == 0:
         reasoning.append("• Barang bukti di bawah gramatur SEMA 4/2010")
     
     if breakdown_hukum['Riwayat Pidana']['skor'] >= 10:
         reasoning.append("⚠ Catatan: Ada riwayat kasus sebelumnya")
     
-    # Normalisasi probabilitas jika ada multiple recommendations
+    # Normalisasi
     total_prob = sum(probabilities.values())
     if total_prob > 100:
         probabilities = {k: (v/total_prob)*100 for k, v in probabilities.items()}
     
-    # Tambahkan probabilitas kecil untuk opsi lain (realistis)
+    # Isi sisa probabilitas
     remaining = 100 - probabilities[primary_recommendation]
     other_options = [k for k in probabilities.keys() if k != primary_recommendation]
     for opt in other_options:
         probabilities[opt] = remaining / len(other_options)
     
     return probabilities, reasoning, primary_recommendation, final_score
+
+# =============================================================================
+# FUNGSI PEMBUATAN PDF
+# =============================================================================
+
+def create_pdf_report(data):
+    """
+    Membuat laporan PDF dari hasil analisis
+    """
+    buffer = BytesIO()
+    c = canvas.Canvas(buffer, pagesize=A4)
+    width, height = A4
+    
+    # Header
+    c.setFont("Helvetica-Bold", 16)
+    c.drawString(2 * cm, height - 2 * cm, "HASIL ANALISIS SISTEM PREDIKSI TAT BNN")
+    
+    c.setFont("Helvetica", 10)
+    c.drawString(2 * cm, height - 3 * cm, f"Waktu Analisis: {data['timestamp']}")
+    c.line(2 * cm, height - 3.2 * cm, width - 2 * cm, height - 3.2 * cm)
+    
+    current_y = height - 4.5 * cm
+    
+    # Skor Ringkasan
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(2 * cm, current_y, "1. RINGKASAN SKOR")
+    current_y -= 0.8 * cm
+    
+    c.setFont("Helvetica", 11)
+    c.drawString(3 * cm, current_y, f"Skor Medis: {data['skor_medis']}/100")
+    c.drawString(9 * cm, current_y, f"Skor Hukum: {data['skor_hukum']}/100")
+    c.drawString(15 * cm, current_y, f"Composite: {data['final_score']:.1f}/100")
+    current_y -= 1.5 * cm
+    
+    # Rekomendasi
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(2 * cm, current_y, "2. REKOMENDASI SISTEM")
+    current_y -= 0.8 * cm
+    
+    # Kotak Rekomendasi
+    c.setFillColor(colors.lightgrey)
+    c.rect(2.5 * cm, current_y - 1.2 * cm, width - 5 * cm, 1.5 * cm, fill=1)
+    c.setFillColor(colors.black)
+    
+    c.setFont("Helvetica-Bold", 14)
+    rec_text = data['primary_rec'].upper()
+    text_width = c.stringWidth(rec_text, "Helvetica-Bold", 14)
+    c.drawString((width - text_width) / 2, current_y - 0.5 * cm, rec_text)
+    
+    confidence = data['probabilities'][data['primary_rec']]
+    c.setFont("Helvetica", 10)
+    conf_text = f"Tingkat Keyakinan: {confidence:.1f}%"
+    text_width = c.stringWidth(conf_text, "Helvetica", 10)
+    c.drawString((width - text_width) / 2, current_y - 1.0 * cm, conf_text)
+    
+    current_y -= 2.5 * cm
+    
+    # Pertimbangan / Reasoning
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(2 * cm, current_y, "3. DASAR PERTIMBANGAN")
+    current_y -= 0.8 * cm
+    
+    c.setFont("Helvetica", 10)
+    for reason in data['reasoning']:
+        c.drawString(2.5 * cm, current_y, reason)
+        current_y -= 0.6 * cm
+        if current_y < 5 * cm: # New page if needed
+            c.showPage()
+            current_y = height - 3 * cm
+            
+    current_y -= 1.0 * cm
+    
+    # Detail Breakdown Medis
+    if current_y < 10 * cm:
+        c.showPage()
+        current_y = height - 3 * cm
+        
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(2 * cm, current_y, "4. DETAIL ASESMEN")
+    current_y -= 0.8 * cm
+    
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(2.5 * cm, current_y, "A. Asesmen Medis")
+    current_y -= 0.6 * cm
+    c.setFont("Helvetica", 10)
+    
+    for k, v in data['breakdown_medis'].items():
+        line = f"- {k}: {v['skor']}/{v['max']} ({v['detail']})"
+        c.drawString(3 * cm, current_y, line)
+        current_y -= 0.5 * cm
+        
+    current_y -= 0.5 * cm
+    
+    c.setFont("Helvetica-Bold", 10)
+    c.drawString(2.5 * cm, current_y, "B. Asesmen Hukum")
+    current_y -= 0.6 * cm
+    c.setFont("Helvetica", 10)
+    
+    for k, v in data['breakdown_hukum'].items():
+        line = f"- {k}: {v['skor']}/{v['max']} ({v['detail']})"
+        c.drawString(3 * cm, current_y, line)
+        current_y -= 0.5 * cm
+
+    # Footer Disclaimer
+    c.setFont("Helvetica-Oblique", 8)
+    c.drawString(2 * cm, 2 * cm, "*Dokumen ini adalah hasil prediksi sistem komputer dan bukan keputusan hukum final.")
+    c.drawString(2 * cm, 1.6 * cm, " Keputusan akhir ditentukan oleh Tim Asesmen Terpadu.")
+
+    c.save()
+    return buffer.getvalue()
 
 # =============================================================================
 # FUNGSI VISUALISASI
@@ -889,7 +979,7 @@ def main():
                 'Rekomendasi': list(results['probabilities'].keys()),
                 'Probabilitas (%)': [f"{v:.1f}%" for v in results['probabilities'].values()],
                 'Status': ['✅ PRIMARY' if k == results['primary_rec'] else '◻️ Alternative' 
-                          for k in results['probabilities'].keys()]
+                           for k in results['probabilities'].keys()]
             })
             st.dataframe(prob_df, use_container_width=True, hide_index=True)
             
@@ -910,33 +1000,30 @@ def main():
             </div>
             """, unsafe_allow_html=True)
             
-            # Export Data
+            # Export Data PDF
             st.markdown("---")
-            st.markdown("### 💾 Export Hasil Analisis")
+            st.markdown("### 💾 Export Hasil Analisis (PDF)")
             
             export_data = {
                 "timestamp": results['timestamp'],
                 "skor_medis": results['skor_medis'],
                 "skor_hukum": results['skor_hukum'],
                 "final_score": results['final_score'],
-                "rekomendasi_utama": results['primary_rec'],
-                "confidence": results['probabilities'][results['primary_rec']],
-                "breakdown_medis": results['breakdown_medis'],
-                "breakdown_hukum": results['breakdown_hukum'],
+                "primary_rec": results['primary_rec'],
                 "probabilities": results['probabilities'],
-                "reasoning": results['reasoning']
+                "reasoning": results['reasoning'],
+                "breakdown_medis": results['breakdown_medis'],
+                "breakdown_hukum": results['breakdown_hukum']
             }
             
-            json_str = json.dumps(export_data, indent=2, ensure_ascii=False)
+            pdf_bytes = create_pdf_report(export_data)
             
-            col_exp1, col_exp2 = st.columns(2)
-            with col_exp1:
-                st.download_button(
-                    label="📥 Download JSON",
-                    data=json_str,
-                    file_name=f"TAT_Analysis_{results['timestamp'].replace(':', '-')}.json",
-                    mime="application/json"
-                )
+            st.download_button(
+                label="📥 Download Laporan PDF",
+                data=pdf_bytes,
+                file_name=f"Laporan_TAT_{results['timestamp'].replace(':', '-')}.pdf",
+                mime="application/pdf"
+            )
         
         else:
             st.info("👈 Silakan isi data di tab **Input Data** dan klik tombol **Analisis & Prediksi**")
