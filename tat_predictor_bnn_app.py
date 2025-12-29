@@ -129,7 +129,7 @@ DSM5_CRITERIA = [
 ]
 
 # =============================================================================
-# FUNGSI GENERATE PDF
+# FUNGSI GENERATE LAPORAN
 # =============================================================================
 
 def generate_pdf_report(export_data):
@@ -1135,7 +1135,7 @@ def main():
             </div>
             """, unsafe_allow_html=True)
             
-            # Export Data
+            # Export Data - SEMUA FORMAT TERSEDIA
             st.markdown("---")
             st.markdown("### 💾 Export Hasil Analisis")
             
@@ -1153,25 +1153,46 @@ def main():
                 "reasoning": results['reasoning']
             }
             
-            col_exp1, col_exp2 = st.columns(2)
+            # Konversi ke JSON
+            json_str = json.dumps(export_data, indent=2, ensure_ascii=False)
+            
+            # Generate TXT Report
+            txt_report = generate_txt_report(export_data)
+            
+            # Generate PDF Report
+            pdf_bytes = generate_pdf_report(export_data)
+            
+            # Tampilkan semua tombol download
+            col_exp1, col_exp2, col_exp3 = st.columns(3)
+            
             with col_exp1:
-                # Generate and download TXT
-                txt_report = generate_txt_report(export_data)
+                # Download JSON
+                st.download_button(
+                    label="📊 Download JSON",
+                    data=json_str,
+                    file_name=f"TAT_Analysis_{results['timestamp'].replace(':', '-').replace(' ', '_')}.json",
+                    mime="application/json",
+                    use_container_width=True
+                )
+            
+            with col_exp2:
+                # Download TXT
                 st.download_button(
                     label="📄 Download TXT Report",
                     data=txt_report,
                     file_name=f"TAT_Analysis_{results['timestamp'].replace(':', '-').replace(' ', '_')}.txt",
-                    mime="text/plain"
+                    mime="text/plain",
+                    use_container_width=True
                 )
             
-            with col_exp2:
-                # Generate and download PDF
-                pdf_bytes = generate_pdf_report(export_data)
+            with col_exp3:
+                # Download PDF
                 st.download_button(
                     label="📘 Download PDF Report",
                     data=pdf_bytes,
                     file_name=f"TAT_Analysis_{results['timestamp'].replace(':', '-').replace(' ', '_')}.pdf",
-                    mime="application/pdf"
+                    mime="application/pdf",
+                    use_container_width=True
                 )
         
         else:
@@ -1441,7 +1462,7 @@ def main():
             - Rekomendasi utama dengan tingkat keyakinan
             - Alasan dan pertimbangan
             - Distribusi probabilitas
-            - Export data jika diperlukan
+            - Export data dalam 3 format: JSON, TXT, dan PDF
             
             #### 5. **Analisis Lebih Dalam di Tab "Visualisasi Detail"**
             Explore:
@@ -1627,8 +1648,8 @@ def main():
             **Q9: Apakah data yang diinput disimpan?**
             
             A: Sistem ini **TIDAK menyimpan** data secara otomatis ke server. Data hanya 
-            ada di session browser. Anda bisa export hasil analisis dalam format TXT atau PDF 
-            untuk dokumentasi internal.
+            ada di session browser. Anda bisa export hasil analisis dalam format JSON, 
+            TXT, atau PDF untuk dokumentasi internal.
             
             ---
             
