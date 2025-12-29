@@ -145,29 +145,36 @@ def generate_pdf_report(export_data):
     elements = []
     styles = getSampleStyleSheet()
     
-    # Custom styles
-    styles.add(ParagraphStyle(name='Center', alignment=TA_CENTER))
-    styles.add(ParagraphStyle(name='Left', alignment=TA_LEFT))
-    styles.add(ParagraphStyle(name='Title', 
+    # === FIX: Rename custom styles to avoid collision with default styles ===
+    # 'Title', 'Heading1', 'Heading2' already exist in getSampleStyleSheet
+    
+    # Add Custom Alignment Styles
+    styles.add(ParagraphStyle(name='ReportCenter', alignment=TA_CENTER))
+    styles.add(ParagraphStyle(name='ReportLeft', alignment=TA_LEFT))
+    
+    # Add Custom Text Styles (Renamed to avoid KeyError)
+    styles.add(ParagraphStyle(name='ReportTitle', 
                             fontSize=16, 
                             alignment=TA_CENTER,
                             spaceAfter=20))
-    styles.add(ParagraphStyle(name='Heading1', 
+                            
+    styles.add(ParagraphStyle(name='ReportHeading1', 
                             fontSize=14, 
                             alignment=TA_LEFT,
                             spaceAfter=12))
-    styles.add(ParagraphStyle(name='Heading2', 
+                            
+    styles.add(ParagraphStyle(name='ReportHeading2', 
                             fontSize=12, 
                             alignment=TA_LEFT,
                             spaceAfter=8))
     
     # Title
-    elements.append(Paragraph("LAPORAN ANALISIS TAT - BNN", styles['Title']))
-    elements.append(Paragraph(f"Waktu Analisis: {export_data['timestamp']}", styles['Center']))
+    elements.append(Paragraph("LAPORAN ANALISIS TAT - BNN", styles['ReportTitle']))
+    elements.append(Paragraph(f"Waktu Analisis: {export_data['timestamp']}", styles['ReportCenter']))
     elements.append(Spacer(1, 20))
     
     # Summary Section
-    elements.append(Paragraph("RINGKASAN HASIL", styles['Heading1']))
+    elements.append(Paragraph("RINGKASAN HASIL", styles['ReportHeading1']))
     
     summary_data = [
         ["Parameter", "Nilai"],
@@ -193,7 +200,7 @@ def generate_pdf_report(export_data):
     elements.append(Spacer(1, 20))
     
     # Breakdown Medis
-    elements.append(Paragraph("BREAKDOWN ASESMEN MEDIS", styles['Heading1']))
+    elements.append(Paragraph("BREAKDOWN ASESMEN MEDIS", styles['ReportHeading1']))
     medis_data = [["Kategori", "Skor", "Detail"]]
     for kategori, data in export_data['breakdown_medis'].items():
         medis_data.append([
@@ -213,7 +220,7 @@ def generate_pdf_report(export_data):
     elements.append(Spacer(1, 20))
     
     # Breakdown Hukum
-    elements.append(Paragraph("BREAKDOWN ASESMEN HUKUM", styles['Heading1']))
+    elements.append(Paragraph("BREAKDOWN ASESMEN HUKUM", styles['ReportHeading1']))
     hukum_data = [["Kategori", "Skor", "Detail"]]
     for kategori, data in export_data['breakdown_hukum'].items():
         hukum_data.append([
@@ -233,7 +240,7 @@ def generate_pdf_report(export_data):
     elements.append(Spacer(1, 20))
     
     # Probabilities
-    elements.append(Paragraph("DISTRIBUSI PROBABILITAS", styles['Heading1']))
+    elements.append(Paragraph("DISTRIBUSI PROBABILITAS", styles['ReportHeading1']))
     prob_data = [["Rekomendasi", "Probabilitas (%)", "Status"]]
     for rec, prob in export_data['probabilities'].items():
         status = "PRIMARY" if rec == export_data['rekomendasi_utama'] else "ALTERNATIVE"
@@ -250,18 +257,18 @@ def generate_pdf_report(export_data):
     elements.append(Spacer(1, 20))
     
     # Reasoning
-    elements.append(Paragraph("ALASAN DAN PERTIMBANGAN", styles['Heading1']))
+    elements.append(Paragraph("ALASAN DAN PERTIMBANGAN", styles['ReportHeading1']))
     for reason in export_data['reasoning']:
-        elements.append(Paragraph(f"• {reason}", styles['Left']))
+        elements.append(Paragraph(f"• {reason}", styles['ReportLeft']))
     
     elements.append(Spacer(1, 20))
     
     # Footer
-    elements.append(Paragraph("CATATAN PENTING:", styles['Heading2']))
-    elements.append(Paragraph("Sistem ini adalah ALAT BANTU untuk proses asesmen.", styles['Left']))
-    elements.append(Paragraph("Keputusan final tetap berada di tangan Tim Asesmen Terpadu BNN.", styles['Left']))
+    elements.append(Paragraph("CATATAN PENTING:", styles['ReportHeading2']))
+    elements.append(Paragraph("Sistem ini adalah ALAT BANTU untuk proses asesmen.", styles['ReportLeft']))
+    elements.append(Paragraph("Keputusan final tetap berada di tangan Tim Asesmen Terpadu BNN.", styles['ReportLeft']))
     elements.append(Paragraph(f"Dokumen ini dihasilkan oleh Sistem Prediksi TAT BNN pada {export_data['timestamp']}", 
-                           styles['Center']))
+                            styles['ReportCenter']))
     
     # Build PDF
     doc.build(elements)
@@ -334,7 +341,7 @@ def generate_txt_report(export_data):
 # =============================================================================
 
 def calculate_medical_score(zat_positif, dsm5_count, durasi_bulan, 
-                           fungsi_sosial, ada_komorbid, tingkat_komorbid):
+                            fungsi_sosial, ada_komorbid, tingkat_komorbid):
     """
     Menghitung Skor Asesmen Medis (0-100 poin)
     
@@ -441,7 +448,7 @@ def calculate_medical_score(zat_positif, dsm5_count, durasi_bulan,
     return score, breakdown
 
 def calculate_legal_score(peran, barang_bukti, jenis_narkotika, 
-                         status_tangkap, riwayat_pidana):
+                          status_tangkap, riwayat_pidana):
     """
     Menghitung Skor Asesmen Hukum (0-100 poin)
     
@@ -1021,8 +1028,8 @@ def main():
                         'riwayat_pidana': riwayat_pidana
                     }
                 }
-            
-            st.success("✅ Analisis selesai!")
+                
+                st.success("✅ Analisis selesai!")
             
         # Tampilkan hasil jika sudah ada di session state
         if 'results' in st.session_state:
@@ -1114,7 +1121,7 @@ def main():
                 'Rekomendasi': list(results['probabilities'].keys()),
                 'Probabilitas (%)': [f"{v:.1f}%" for v in results['probabilities'].values()],
                 'Status': ['✅ PRIMARY' if k == results['primary_rec'] else '◻️ Alternative' 
-                          for k in results['probabilities'].keys()]
+                           for k in results['probabilities'].keys()]
             })
             st.dataframe(prob_df, use_container_width=True, hide_index=True)
             
@@ -1194,7 +1201,7 @@ def main():
                     mime="application/pdf",
                     use_container_width=True
                 )
-        
+            
         else:
             st.info("👈 Silakan isi data di tab **Input Data** dan klik tombol **Analisis & Prediksi**")
     
@@ -1269,7 +1276,7 @@ def main():
                         'Detail': data['detail']
                     })
                 st.dataframe(pd.DataFrame(hukum_detail), use_container_width=True, hide_index=True)
-        
+            
         else:
             st.info("👈 Silakan isi data di tab **Input Data** dan klik tombol **Analisis & Prediksi**")
     
