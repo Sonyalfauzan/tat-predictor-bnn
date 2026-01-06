@@ -21,6 +21,14 @@ import plotly.graph_objects as go
 import plotly.express as px
 from datetime import datetime
 import json
+from io import BytesIO
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.pdfgen import canvas
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 # =============================================================================
 # KONFIGURASI HALAMAN
@@ -119,6 +127,207 @@ DSM5_CRITERIA = [
     "Toleransi (butuh dosis lebih tinggi)",
     "Withdrawal/Sakau (gejala putus zat)"
 ]
+
+# =============================================================================
+# FUNGSI GENERATE PDF
+# =============================================================================
+
+def generate_pdf_report(export_data):
+    """Generate PDF report from analysis data"""
+    buffer = BytesIO()
+    
+    # Create PDF document
+    doc = SimpleDocTemplate(buffer, pagesize=letter,
+                          rightMargin=72, leftMargin=72,
+                          topMargin=72, bottomMargin=72)
+    
+    # Container for the 'Flowable' objects
+    elements = []
+    styles = getSampleStyleSheet()
+    
+    # Custom styles
+    styles.add(ParagraphStyle(name='Center', alignment=TA_CENTER))
+    styles.add(ParagraphStyle(name='Left', alignment=TA_LEFT))
+    styles.add(ParagraphStyle(name='Title', 
+                            fontSize=16, 
+                            alignment=TA_CENTER,
+                            spaceAfter=20))
+    styles.add(ParagraphStyle(name='Heading1', 
+                            fontSize=14, 
+                            alignment=TA_LEFT,
+                            spaceAfter=12))
+    styles.add(ParagraphStyle(name='Heading2', 
+                            fontSize=12, 
+                            alignment=TA_LEFT,
+                            spaceAfter=8))
+    
+    # Title
+    elements.append(Paragraph("LAPORAN ANALISIS TAT - BNN", styles['Title']))
+    elements.append(Paragraph(f"Waktu Analisis: {export_data['timestamp']}", styles['Center']))
+    elements.append(Spacer(1, 20))
+    
+    # Summary Section
+    elements.append(Paragraph("RINGKASAN HASIL", styles['Heading1']))
+    
+    summary_data = [
+        ["Parameter", "Nilai"],
+        ["Skor Asesmen Medis", f"{export_data['skor_medis']}/100"],
+        ["Skor Asesmen Hukum", f"{export_data['skor_hukum']}/100"],
+        ["Composite Score", f"{export_data['final_score']:.1f}/100"],
+        ["Rekomendasi Utama", export_data['rekomendasi_utama']],
+        ["Tingkat Keyakinan", f"{export_data['confidence']:.1f}%"],
+    ]
+    
+    summary_table = Table(summary_data, colWidths=[2.5*inch, 2.5*inch])
+    summary_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, 0), 10),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    elements.append(summary_table)
+    elements.append(Spacer(1, 20))
+    
+    # Breakdown Medis
+    elements.append(Paragraph("BREAKDOWN ASESMEN MEDIS", styles['Heading1']))
+    medis_data = [["Kategori", "Skor", "Detail"]]
+    for kategori, data in export_data['breakdown_medis'].items():
+        medis_data.append([
+            kategori,
+            f"{data['skor']}/{data['max']}",
+            data['detail']
+        ])
+    
+    medis_table = Table(medis_data, colWidths=[1.5*inch, 1*inch, 3*inch])
+    medis_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightblue),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    elements.append(medis_table)
+    elements.append(Spacer(1, 20))
+    
+    # Breakdown Hukum
+    elements.append(Paragraph("BREAKDOWN ASESMEN HUKUM", styles['Heading1']))
+    hukum_data = [["Kategori", "Skor", "Detail"]]
+    for kategori, data in export_data['breakdown_hukum'].items():
+        hukum_data.append([
+            kategori,
+            f"{data['skor']}/{data['max']}",
+            data['detail']
+        ])
+    
+    hukum_table = Table(hukum_data, colWidths=[1.5*inch, 1*inch, 3*inch])
+    hukum_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgreen),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    elements.append(hukum_table)
+    elements.append(Spacer(1, 20))
+    
+    # Probabilities
+    elements.append(Paragraph("DISTRIBUSI PROBABILITAS", styles['Heading1']))
+    prob_data = [["Rekomendasi", "Probabilitas (%)", "Status"]]
+    for rec, prob in export_data['probabilities'].items():
+        status = "PRIMARY" if rec == export_data['rekomendasi_utama'] else "ALTERNATIVE"
+        prob_data.append([rec, f"{prob:.1f}%", status])
+    
+    prob_table = Table(prob_data, colWidths=[2*inch, 1.5*inch, 1.5*inch])
+    prob_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.lightgrey),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black)
+    ]))
+    elements.append(prob_table)
+    elements.append(Spacer(1, 20))
+    
+    # Reasoning
+    elements.append(Paragraph("ALASAN DAN PERTIMBANGAN", styles['Heading1']))
+    for reason in export_data['reasoning']:
+        elements.append(Paragraph(f"• {reason}", styles['Left']))
+    
+    elements.append(Spacer(1, 20))
+    
+    # Footer
+    elements.append(Paragraph("CATATAN PENTING:", styles['Heading2']))
+    elements.append(Paragraph("Sistem ini adalah ALAT BANTU untuk proses asesmen.", styles['Left']))
+    elements.append(Paragraph("Keputusan final tetap berada di tangan Tim Asesmen Terpadu BNN.", styles['Left']))
+    elements.append(Paragraph(f"Dokumen ini dihasilkan oleh Sistem Prediksi TAT BNN pada {export_data['timestamp']}", 
+                           styles['Center']))
+    
+    # Build PDF
+    doc.build(elements)
+    
+    # Get PDF bytes
+    pdf_bytes = buffer.getvalue()
+    buffer.close()
+    
+    return pdf_bytes
+
+def generate_txt_report(export_data):
+    """Generate TXT report from analysis data"""
+    txt_content = []
+    txt_content.append("=" * 60)
+    txt_content.append("LAPORAN ANALISIS TAT - BADAN NARKOTIKA NASIONAL")
+    txt_content.append("=" * 60)
+    txt_content.append(f"Waktu Analisis: {export_data['timestamp']}")
+    txt_content.append("")
+    
+    # Summary
+    txt_content.append("RINGKASAN HASIL")
+    txt_content.append("-" * 40)
+    txt_content.append(f"Skor Asesmen Medis: {export_data['skor_medis']}/100")
+    txt_content.append(f"Skor Asesmen Hukum: {export_data['skor_hukum']}/100")
+    txt_content.append(f"Composite Score: {export_data['final_score']:.1f}/100")
+    txt_content.append(f"Rekomendasi Utama: {export_data['rekomendasi_utama']}")
+    txt_content.append(f"Tingkat Keyakinan: {export_data['confidence']:.1f}%")
+    txt_content.append("")
+    
+    # Breakdown Medis
+    txt_content.append("BREAKDOWN ASESMEN MEDIS")
+    txt_content.append("-" * 40)
+    for kategori, data in export_data['breakdown_medis'].items():
+        txt_content.append(f"{kategori}: {data['skor']}/{data['max']} - {data['detail']}")
+    txt_content.append("")
+    
+    # Breakdown Hukum
+    txt_content.append("BREAKDOWN ASESMEN HUKUM")
+    txt_content.append("-" * 40)
+    for kategori, data in export_data['breakdown_hukum'].items():
+        txt_content.append(f"{kategori}: {data['skor']}/{data['max']} - {data['detail']}")
+    txt_content.append("")
+    
+    # Probabilities
+    txt_content.append("DISTRIBUSI PROBABILITAS")
+    txt_content.append("-" * 40)
+    for rec, prob in export_data['probabilities'].items():
+        status = " (PRIMARY)" if rec == export_data['rekomendasi_utama'] else ""
+        txt_content.append(f"{rec}: {prob:.1f}%{status}")
+    txt_content.append("")
+    
+    # Reasoning
+    txt_content.append("ALASAN DAN PERTIMBANGAN")
+    txt_content.append("-" * 40)
+    for reason in export_data['reasoning']:
+        txt_content.append(f"• {reason}")
+    txt_content.append("")
+    
+    # Footer
+    txt_content.append("=" * 60)
+    txt_content.append("CATATAN PENTING:")
+    txt_content.append("- Sistem ini adalah ALAT BANTU untuk proses asesmen.")
+    txt_content.append("- Keputusan final tetap berada di tangan Tim Asesmen Terpadu BNN.")
+    txt_content.append("=" * 60)
+    
+    return "\n".join(txt_content)
 
 # =============================================================================
 # FUNGSI PERHITUNGAN SKOR
@@ -794,7 +1003,23 @@ def main():
                     'reasoning': reasoning,
                     'primary_rec': primary_rec,
                     'final_score': final_score,
-                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'input_data': {
+                        'nama_inisial': nama_inisial,
+                        'usia': usia,
+                        'jenis_kelamin': jenis_kelamin,
+                        'zat_positif': zat_positif,
+                        'dsm5_count': dsm5_count,
+                        'durasi_bulan': durasi_bulan,
+                        'fungsi_sosial': fungsi_sosial,
+                        'ada_komorbid': ada_komorbid,
+                        'tingkat_komorbid': tingkat_komorbid,
+                        'peran': peran,
+                        'jenis_narkotika': jenis_narkotika,
+                        'barang_bukti': barang_bukti,
+                        'status_tangkap': status_tangkap,
+                        'riwayat_pidana': riwayat_pidana
+                    }
                 }
             
             st.success("✅ Analisis selesai!")
@@ -916,6 +1141,7 @@ def main():
             
             export_data = {
                 "timestamp": results['timestamp'],
+                "input_data": results['input_data'],
                 "skor_medis": results['skor_medis'],
                 "skor_hukum": results['skor_hukum'],
                 "final_score": results['final_score'],
@@ -927,15 +1153,25 @@ def main():
                 "reasoning": results['reasoning']
             }
             
-            json_str = json.dumps(export_data, indent=2, ensure_ascii=False)
-            
             col_exp1, col_exp2 = st.columns(2)
             with col_exp1:
+                # Generate and download TXT
+                txt_report = generate_txt_report(export_data)
                 st.download_button(
-                    label="📥 Download JSON",
-                    data=json_str,
-                    file_name=f"TAT_Analysis_{results['timestamp'].replace(':', '-')}.json",
-                    mime="application/json"
+                    label="📄 Download TXT Report",
+                    data=txt_report,
+                    file_name=f"TAT_Analysis_{results['timestamp'].replace(':', '-').replace(' ', '_')}.txt",
+                    mime="text/plain"
+                )
+            
+            with col_exp2:
+                # Generate and download PDF
+                pdf_bytes = generate_pdf_report(export_data)
+                st.download_button(
+                    label="📘 Download PDF Report",
+                    data=pdf_bytes,
+                    file_name=f"TAT_Analysis_{results['timestamp'].replace(':', '-').replace(' ', '_')}.pdf",
+                    mime="application/pdf"
                 )
         
         else:
@@ -1391,7 +1627,7 @@ def main():
             **Q9: Apakah data yang diinput disimpan?**
             
             A: Sistem ini **TIDAK menyimpan** data secara otomatis ke server. Data hanya 
-            ada di session browser. Anda bisa export hasil analisis dalam format JSON 
+            ada di session browser. Anda bisa export hasil analisis dalam format TXT atau PDF 
             untuk dokumentasi internal.
             
             ---
