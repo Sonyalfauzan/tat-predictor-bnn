@@ -146,28 +146,31 @@ def generate_pdf_report(export_data):
     styles = getSampleStyleSheet()
     
     # Custom styles
-    styles.add(ParagraphStyle(name='Center', alignment=TA_CENTER))
-    styles.add(ParagraphStyle(name='Left', alignment=TA_LEFT))
-    styles.add(ParagraphStyle(name='Title', 
+    styles.add(ParagraphStyle(name='CustomCenter', alignment=TA_CENTER))
+    styles.add(ParagraphStyle(name='CustomLeft', alignment=TA_LEFT))
+    styles.add(ParagraphStyle(name='ReportTitle', 
                             fontSize=16, 
                             alignment=TA_CENTER,
-                            spaceAfter=20))
-    styles.add(ParagraphStyle(name='Heading1', 
+                            spaceAfter=20,
+                            fontName='Helvetica-Bold'))
+    styles.add(ParagraphStyle(name='SectionHeading', 
                             fontSize=14, 
                             alignment=TA_LEFT,
-                            spaceAfter=12))
-    styles.add(ParagraphStyle(name='Heading2', 
+                            spaceAfter=12,
+                            fontName='Helvetica-Bold'))
+    styles.add(ParagraphStyle(name='SubHeading', 
                             fontSize=12, 
                             alignment=TA_LEFT,
-                            spaceAfter=8))
+                            spaceAfter=8,
+                            fontName='Helvetica-Bold'))
     
     # Title
-    elements.append(Paragraph("LAPORAN ANALISIS TAT - BNN", styles['Title']))
+    elements.append(Paragraph("LAPORAN ANALISIS TAT - BNN", styles['ReportTitle']))
     elements.append(Paragraph(f"Waktu Analisis: {export_data['timestamp']}", styles['Center']))
     elements.append(Spacer(1, 20))
     
     # Summary Section
-    elements.append(Paragraph("RINGKASAN HASIL", styles['Heading1']))
+    elements.append(Paragraph("RINGKASAN HASIL", styles['SectionHeading']))
     
     summary_data = [
         ["Parameter", "Nilai"],
@@ -257,8 +260,8 @@ def generate_pdf_report(export_data):
     elements.append(Spacer(1, 20))
     
     # Footer
-    elements.append(Paragraph("CATATAN PENTING:", styles['Heading2']))
-    elements.append(Paragraph("Sistem ini adalah ALAT BANTU untuk proses asesmen.", styles['Left']))
+    elements.append(Paragraph("CATATAN PENTING:", styles['SubHeading']))
+    elements.append(Paragraph("Sistem ini adalah ALAT BANTU untuk proses asesmen.", styles['CustomLeft']))
     elements.append(Paragraph("Keputusan final tetap berada di tangan Tim Asesmen Terpadu BNN.", styles['Left']))
     elements.append(Paragraph(f"Dokumen ini dihasilkan oleh Sistem Prediksi TAT BNN pada {export_data['timestamp']}", 
                            styles['Center']))
@@ -1153,7 +1156,7 @@ def main():
                 "reasoning": results['reasoning']
             }
             
-            col_exp1, col_exp2 = st.columns(2)
+            col_exp1, col_exp2, col_exp3 = st.columns(3)
             with col_exp1:
                 # Generate and download TXT
                 txt_report = generate_txt_report(export_data)
@@ -1173,6 +1176,16 @@ def main():
                     file_name=f"TAT_Analysis_{results['timestamp'].replace(':', '-').replace(' ', '_')}.pdf",
                     mime="application/pdf"
                 )
+
+            with col_exp3:
+                # Generate and download PDF
+                pdf_bytes = generate_pdf_report(export_data)
+                st.download_button(
+                    label="📘 Download PDF",
+                    data=pdf_bytes,
+                    file_name=f"TAT_Analysis_{results['timestamp'].replace(':', '-').replace(' ', '_')}.pdf",
+                    mime="application/pdf"
+                )            
         
         else:
             st.info("👈 Silakan isi data di tab **Input Data** dan klik tombol **Analisis & Prediksi**")
@@ -1675,3 +1688,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
