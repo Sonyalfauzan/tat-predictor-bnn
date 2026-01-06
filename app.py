@@ -1,20 +1,40 @@
+"""
+=================================================================================
+SISTEM PREDIKSI TAT (TIM ASESMEN TERPADU) BNN
+=================================================================================
+Tools bantu untuk proses asesmen narkotika berdasarkan:
+- UU No. 35 Tahun 2009 tentang Narkotika
+- SEMA No. 4 Tahun 2010
+- Peraturan Bersama 7 Instansi No. 01/PB/MA/III/2014
+- Perka BNN No. 11 Tahun 2014
+- Instrumen Asesmen: ASAM, ASSIST, DSM-5, ICD-10
+
+CATATAN PENTING:
+Sistem ini adalah ALAT BANTU untuk Tim Asesmen Terpadu.
+Keputusan final tetap ada di tangan BNN dan aparat penegak hukum.
+=================================================================================
+"""
+
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+import plotly.graph_objects as go
+import plotly.express as px
+from datetime import datetime
 import json
-from utils.scoring import calculate_tat_score, get_recommendation
-from utils.pdf_generator import generate_pdf_report
-from utils.data_storage import save_case, load_cases, get_statistics
 
-# Page config
+# =============================================================================
+# KONFIGURASI HALAMAN
+# =============================================================================
 st.set_page_config(
-    page_title="TAT Decision Support System",
+    page_title="TAT Predictor - BNN",
     page_icon="⚖️",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# =============================================================================
+# CUSTOM CSS
+# =============================================================================
 st.markdown("""
 <style>
     .main-header {
@@ -22,884 +42,1400 @@ st.markdown("""
         font-weight: bold;
         color: #1f77b4;
         text-align: center;
-        margin-bottom: 1rem;
+        padding: 1rem;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
     }
-    .sub-header {
-        font-size: 1.2rem;
-        color: #555;
-        text-align: center;
-        margin-bottom: 2rem;
-    }
-    .success-box {
+    .metric-card {
+        background-color: #f0f2f6;
         padding: 1rem;
         border-radius: 0.5rem;
-        background-color: #d4edda;
-        border: 1px solid #c3e6cb;
-        margin: 1rem 0;
+        border-left: 4px solid #1f77b4;
     }
     .warning-box {
-        padding: 1rem;
-        border-radius: 0.5rem;
         background-color: #fff3cd;
-        border: 1px solid #ffeeba;
-        margin: 1rem 0;
-    }
-    .danger-box {
+        border-left: 4px solid #ffc107;
         padding: 1rem;
         border-radius: 0.5rem;
-        background-color: #f8d7da;
-        border: 1px solid #f5c6cb;
         margin: 1rem 0;
     }
     .info-box {
+        background-color: #d1ecf1;
+        border-left: 4px solid #17a2b8;
         padding: 1rem;
         border-radius: 0.5rem;
-        background-color: #d1ecf1;
-        border: 1px solid #bee5eb;
+        margin: 1rem 0;
+    }
+    .success-box {
+        background-color: #d4edda;
+        border-left: 4px solid #28a745;
+        padding: 1rem;
+        border-radius: 0.5rem;
         margin: 1rem 0;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Initialize session state
-if 'case_data' not in st.session_state:
-    st.session_state.case_data = {}
-if 'recommendation' not in st.session_state:
-    st.session_state.recommendation = None
+# =============================================================================
+# KONSTANTA DAN KONFIGURASI
+# =============================================================================
 
-# Sidebar Navigation
-st.sidebar.title("🏛️ TAT-DSS v1.0")
-st.sidebar.markdown("---")
-menu = st.sidebar.radio(
-    "Navigasi",
-    ["📝 Input Asesmen", "📊 Dashboard & Statistik", "📚 Panduan Hukum", "ℹ️ Tentang Sistem"]
-)
-st.sidebar.markdown("---")
-st.sidebar.info("""
-**Tim Asesmen Terpadu (TAT)**  
-Badan Narkotika Nasional
+# Gramatur berdasarkan SEMA 4/2010
+GRAMATUR_LIMITS = {
+    "Ganja/Cannabis": 5.0,
+    "Metamfetamin/Sabu": 1.0,
+    "Heroin": 1.8,
+    "Kokain": 1.8,
+    "Ekstasi/MDMA": 2.4,
+    "Morfin": 1.8,
+    "Kodein": 72.0,
+    "Lainnya": 1.0
+}
 
-Dasar Hukum:
-- UU No. 35/2009 (Narkotika)
-- KUHP Nasional UU No. 1/2023
-- UU Penyesuaian Pidana 2025
-- Pedoman Jaksa Agung 18/2021
-""")
+# Jenis-jenis narkotika untuk tes urine
+JENIS_NARKOTIKA = [
+    "Metamfetamin (MET/Sabu)",
+    "Morfin (MOP/Heroin)",
+    "Kokain (COC)",
+    "Amfetamin (AMP)",
+    "Benzodiazepin (BZO)",
+    "THC (Ganja)",
+    "MDMA (Ekstasi)",
+    "Lainnya"
+]
 
-# ============================================================================
-# MENU 1: INPUT ASESMEN
-# ============================================================================
-if menu == "📝 Input Asesmen":
-    st.markdown('<p class="main-header">⚖️ TIM ASESMEN TERPADU (TAT)</p>', unsafe_allow_html=True)
-    st.markdown('<p class="sub-header">Sistem Pendukung Keputusan Cepat & Akurat</p>', unsafe_allow_html=True)
+# Kriteria DSM-5 (11 kriteria gangguan penggunaan zat)
+DSM5_CRITERIA = [
+    "Menggunakan dalam jumlah/waktu lebih lama dari yang direncanakan",
+    "Keinginan kuat/gagal mengurangi penggunaan",
+    "Banyak waktu untuk mendapatkan/menggunakan/pulih dari efek",
+    "Craving (keinginan kuat menggunakan)",
+    "Gagal memenuhi kewajiban (kerja/sekolah/rumah)",
+    "Terus menggunakan meski ada masalah sosial/interpersonal",
+    "Mengurangi/meninggalkan aktivitas penting karena penggunaan",
+    "Menggunakan dalam situasi berbahaya",
+    "Terus menggunakan meski tahu ada masalah fisik/psikologis",
+    "Toleransi (butuh dosis lebih tinggi)",
+    "Withdrawal/Sakau (gejala putus zat)"
+]
+
+# =============================================================================
+# FUNGSI PERHITUNGAN SKOR
+# =============================================================================
+
+def calculate_medical_score(zat_positif, dsm5_count, durasi_bulan, 
+                           fungsi_sosial, ada_komorbid, tingkat_komorbid):
+    """
+    Menghitung Skor Asesmen Medis (0-100 poin)
     
-    # Progress indicator
-    progress_col1, progress_col2, progress_col3 = st.columns(3)
-    with progress_col1:
-        st.info("**STEP 1** | Data Identitas")
-    with progress_col2:
-        st.info("**STEP 2** | Asesmen Medis & Hukum")
-    with progress_col3:
-        st.info("**STEP 3** | Rekomendasi TAT")
+    Komponen:
+    1. Hasil Tes Urine (0-25 poin)
+    2. Tingkat Kecanduan DSM-5 (0-30 poin)
+    3. Durasi Penggunaan (0-15 poin)
+    4. Dampak Fungsi Sosial (0-15 poin)
+    5. Kondisi Komorbid (0-15 poin)
+    """
+    score = 0
+    breakdown = {}
     
-    st.markdown("---")
+    # 1. Hasil Tes Urine (0-25 poin)
+    num_zat = len(zat_positif)
+    if num_zat == 0:
+        urine_score = 0
+    elif num_zat == 1:
+        urine_score = 10
+    elif num_zat <= 3:
+        urine_score = 15
+    else:  # Polisubstansi (≥4 zat)
+        urine_score = 25
     
-    # SECTION 1: IDENTITAS TERSANGKA
-    st.header("1️⃣ IDENTITAS TERSANGKA")
-    col1, col2 = st.columns(2)
+    breakdown['Tes Urine'] = {
+        'skor': urine_score,
+        'max': 25,
+        'detail': f"{num_zat} zat terdeteksi positif"
+    }
+    score += urine_score
     
-    with col1:
-        nama = st.text_input("Nama Lengkap", placeholder="Nama tersangka")
-        usia = st.number_input("Usia", min_value=10, max_value=100, value=25)
-        jenis_kelamin = st.selectbox("Jenis Kelamin", ["Laki-laki", "Perempuan"])
-        
-    with col2:
-        pendidikan = st.selectbox("Pendidikan Terakhir", 
-                                  ["SD", "SMP", "SMA/SMK", "Diploma", "S1", "S2/S3"])
-        pekerjaan = st.text_input("Pekerjaan", placeholder="Pekerjaan tersangka")
-        tanggal_asesmen = st.date_input("Tanggal Asesmen", value=datetime.now())
-    
-    st.markdown("---")
-    
-    # SECTION 2: ASESMEN CEPAT
-    st.header("2️⃣ ASESMEN CEPAT")
-    
-    # Tab untuk memisahkan asesmen medis dan hukum
-    tab1, tab2 = st.tabs(["🏥 Asesmen Medis", "⚖️ Asesmen Hukum"])
-    
-    # TAB MEDIS
-    with tab1:
-        st.subheader("A. Hasil Tes Urine")
-        
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            met_test = st.checkbox("MET (Methamphetamine)")
-            amp_test = st.checkbox("AMP (Amphetamine)")
-            thc_test = st.checkbox("THC (Cannabis)")
-        with col2:
-            coc_test = st.checkbox("COC (Cocaine)")
-            mop_test = st.checkbox("MOP (Morphine)")
-            bzo_test = st.checkbox("BZO (Benzodiazepine)")
-        with col3:
-            mdma_test = st.checkbox("MDMA (Ecstasy)")
-            k2_test = st.checkbox("K2 (Synthetic Cannabis)")
-        
-        # Hitung jenis zat yang positif
-        positive_tests = sum([met_test, amp_test, thc_test, coc_test, mop_test, bzo_test, mdma_test, k2_test])
-        
-        st.info(f"**Zat Terdeteksi:** {positive_tests} jenis")
-        
-        st.markdown("---")
-        st.subheader("B. Tingkat Kecanduan (Quick Assessment)")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            frekuensi = st.select_slider(
-                "Frekuensi Penggunaan (3 bulan terakhir)",
-                options=["Tidak pernah", "1-2 kali", "Bulanan", "Mingguan", "Harian"],
-                value="Bulanan"
-            )
-            durasi = st.select_slider(
-                "Durasi Penggunaan",
-                options=["< 6 bulan", "6-12 bulan", "1-3 tahun", "> 3 tahun"],
-                value="6-12 bulan"
-            )
-        
-        with col2:
-            withdrawal = st.checkbox("Gejala withdrawal saat berhenti", value=False)
-            toleransi = st.checkbox("Butuh dosis lebih tinggi (toleransi)", value=False)
-            kehidupan_terganggu = st.checkbox("Aktivitas sehari-hari terganggu", value=False)
-            keinginan_kuat = st.checkbox("Keinginan kuat untuk menggunakan", value=False)
-        
-        # Hitung skor kecanduan sederhana
+    # 2. Tingkat Kecanduan berdasarkan DSM-5 (0-30 poin)
+    if dsm5_count <= 1:
         addiction_score = 0
-        if frekuensi == "Harian": addiction_score += 8
-        elif frekuensi == "Mingguan": addiction_score += 6
-        elif frekuensi == "Bulanan": addiction_score += 3
-        elif frekuensi == "1-2 kali": addiction_score += 1
-        
-        if durasi == "> 3 tahun": addiction_score += 6
-        elif durasi == "1-3 tahun": addiction_score += 4
-        elif durasi == "6-12 bulan": addiction_score += 2
-        elif durasi == "< 6 bulan": addiction_score += 1
-        
-        addiction_score += sum([withdrawal, toleransi, kehidupan_terganggu, keinginan_kuat]) * 3
-        
-        # Klasifikasi
-        if addiction_score <= 10:
-            addiction_level = "RINGAN"
-            addiction_color = "success"
-        elif addiction_score <= 20:
-            addiction_level = "SEDANG"
-            addiction_color = "warning"
-        else:
-            addiction_level = "BERAT"
-            addiction_color = "danger"
-        
-        st.markdown(f'<div class="{addiction_color}-box"><strong>Tingkat Kecanduan: {addiction_level}</strong> (Skor: {addiction_score}/30)</div>', 
-                   unsafe_allow_html=True)
-        
-        st.markdown("---")
-        st.subheader("C. Kondisi Medis & Psikologis")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            kondisi_fisik = st.selectbox("Kondisi Fisik Umum", 
-                                        ["Baik", "Cukup", "Kurang", "Buruk"])
-            bekas_suntikan = st.checkbox("Tanda bekas suntikan", value=False)
-        
-        with col2:
-            gangguan_jiwa = st.checkbox("Gangguan jiwa/depresi/ansietas", value=False)
-            dukungan_keluarga = st.selectbox("Dukungan Keluarga", 
-                                            ["Kuat", "Sedang", "Lemah"])
-        
-        motivasi_pulih = st.slider("Motivasi untuk Pulih (1-10)", 1, 10, 5)
+        severity = "Tidak ada gangguan"
+    elif dsm5_count <= 3:
+        addiction_score = 10
+        severity = "Ringan (Mild)"
+    elif dsm5_count <= 5:
+        addiction_score = 20
+        severity = "Sedang (Moderate)"
+    else:  # ≥6 kriteria
+        addiction_score = 30
+        severity = "Berat (Severe)"
     
-    # TAB HUKUM
-    with tab2:
-        st.subheader("A. Barang Bukti")
+    breakdown['Tingkat Kecanduan'] = {
+        'skor': addiction_score,
+        'max': 30,
+        'detail': f"{dsm5_count}/11 kriteria DSM-5 - {severity}"
+    }
+    score += addiction_score
+    
+    # 3. Durasi Penggunaan (0-15 poin)
+    if durasi_bulan < 6:
+        duration_score = 5
+        duration_label = "< 6 bulan"
+    elif durasi_bulan <= 12:
+        duration_score = 10
+        duration_label = "6-12 bulan"
+    else:
+        duration_score = 15
+        duration_label = "> 12 bulan"
+    
+    breakdown['Durasi Penggunaan'] = {
+        'skor': duration_score,
+        'max': 15,
+        'detail': f"{durasi_bulan} bulan ({duration_label})"
+    }
+    score += duration_score
+    
+    # 4. Dampak Fungsi Sosial (0-15 poin)
+    if fungsi_sosial == "Masih produktif (sekolah/kerja)":
+        social_score = 0
+    elif fungsi_sosial == "Mulai terganggu":
+        social_score = 8
+    else:  # "Tidak berfungsi sama sekali"
+        social_score = 15
+    
+    breakdown['Fungsi Sosial'] = {
+        'skor': social_score,
+        'max': 15,
+        'detail': fungsi_sosial
+    }
+    score += social_score
+    
+    # 5. Kondisi Komorbid (0-15 poin)
+    if not ada_komorbid:
+        comorbid_score = 0
+        comorbid_detail = "Tidak ada"
+    elif tingkat_komorbid == "Ringan":
+        comorbid_score = 8
+        comorbid_detail = "Gangguan psikologis ringan"
+    else:  # "Berat"
+        comorbid_score = 15
+        comorbid_detail = "Gangguan psikiatrik/medis serius"
+    
+    breakdown['Komorbid'] = {
+        'skor': comorbid_score,
+        'max': 15,
+        'detail': comorbid_detail
+    }
+    score += comorbid_score
+    
+    return score, breakdown
+
+def calculate_legal_score(peran, barang_bukti, jenis_narkotika, 
+                         status_tangkap, riwayat_pidana):
+    """
+    Menghitung Skor Asesmen Hukum (0-100 poin)
+    
+    Komponen:
+    1. Keterlibatan Jaringan Peredaran (0-40 poin)
+    2. Barang Bukti vs Gramatur SEMA (0-25 poin)
+    3. Status Penangkapan (0-15 poin)
+    4. Riwayat Pidana (0-20 poin)
+    """
+    score = 0
+    breakdown = {}
+    
+    # 1. Keterlibatan Jaringan Peredaran (0-40 poin)
+    role_mapping = {
+        "Pengguna murni (untuk diri sendiri)": 0,
+        "Berbagi dengan teman (sharing)": 15,
+        "Kurir/pengedar kecil": 25,
+        "Pengedar besar/bandar": 40
+    }
+    network_score = role_mapping[peran]
+    breakdown['Keterlibatan Jaringan'] = {
+        'skor': network_score,
+        'max': 40,
+        'detail': peran
+    }
+    score += network_score
+    
+    # 2. Barang Bukti vs Gramatur SEMA (0-25 poin)
+    gramatur_limit = GRAMATUR_LIMITS.get(jenis_narkotika, 1.0)
+    
+    if barang_bukti < gramatur_limit:
+        evidence_score = 0
+        evidence_label = f"Di bawah gramatur SEMA (< {gramatur_limit}g)"
+    elif barang_bukti <= gramatur_limit * 5:
+        evidence_score = 10
+        evidence_label = f"1-5x gramatur SEMA ({gramatur_limit}-{gramatur_limit*5}g)"
+    elif barang_bukti <= gramatur_limit * 20:
+        evidence_score = 18
+        evidence_label = f"5-20x gramatur SEMA"
+    else:
+        evidence_score = 25
+        evidence_label = f"Lebih dari 20x gramatur SEMA (> {gramatur_limit*20}g)"
+    
+    breakdown['Barang Bukti'] = {
+        'skor': evidence_score,
+        'max': 25,
+        'detail': f"{barang_bukti}g - {evidence_label}"
+    }
+    score += evidence_score
+    
+    # 3. Status Penangkapan (0-15 poin)
+    arrest_mapping = {
+        "Sukarela datang untuk asesmen": 0,
+        "Operasi targeted (penggerebekan terencana)": 8,
+        "Tertangkap tangan saat transaksi": 15
+    }
+    arrest_score = arrest_mapping[status_tangkap]
+    breakdown['Status Penangkapan'] = {
+        'skor': arrest_score,
+        'max': 15,
+        'detail': status_tangkap
+    }
+    score += arrest_score
+    
+    # 4. Riwayat Pidana (0-20 poin)
+    history_mapping = {
+        "First offender (pertama kali)": 0,
+        "Pernah rehab sebelumnya (relapse)": 10,
+        "Residivis kasus narkotika": 20
+    }
+    history_score = history_mapping[riwayat_pidana]
+    breakdown['Riwayat Pidana'] = {
+        'skor': history_score,
+        'max': 20,
+        'detail': riwayat_pidana
+    }
+    score += history_score
+    
+    return score, breakdown
+
+def apply_decision_rules(skor_medis, skor_hukum, breakdown_medis, breakdown_hukum):
+    """
+    Menerapkan Decision Rules untuk menghasilkan probabilitas rekomendasi
+    
+    Berdasarkan:
+    - SEMA 4/2010
+    - Kriteria TAT BNN
+    - Best practices rehabilitasi
+    """
+    # Composite Score dengan bobot
+    final_score = (skor_medis * 0.6) + (skor_hukum * 0.4)
+    
+    # Inisialisasi probabilitas
+    probabilities = {
+        "Rehabilitasi Rawat Jalan": 0,
+        "Rehabilitasi Rawat Inap": 0,
+        "Proses Hukum": 0,
+        "Proses Hukum + Rehabilitasi": 0
+    }
+    
+    reasoning = []
+    primary_recommendation = ""
+    
+    # ==========================================================================
+    # RULE 1: REHABILITASI RAWAT JALAN
+    # ==========================================================================
+    if (20 <= skor_medis <= 50 and  # Kecanduan ringan-sedang
+        skor_hukum <= 20 and         # Pengguna murni atau sharing minimal
+        breakdown_medis['Fungsi Sosial']['skor'] <= 8):  # Masih produktif
         
-        col1, col2 = st.columns(2)
-        with col1:
-            jenis_narkotika = st.selectbox(
-                "Jenis Narkotika",
-                ["Ganja (Cannabis)", "Sabu (Methamphetamine)", "Ekstasi (MDMA)", 
-                 "Kokain", "Heroin", "Lainnya"]
-            )
-            berat_bb = st.number_input("Berat Barang Bukti (gram)", min_value=0.0, value=0.5, step=0.1)
+        probabilities["Rehabilitasi Rawat Jalan"] = 85
+        reasoning.append("✓ Tingkat kecanduan ringan-sedang (20-50 poin)")
+        reasoning.append("✓ Tidak ada keterlibatan jaringan signifikan")
+        reasoning.append("✓ Masih berfungsi sosial (produktif)")
+        reasoning.append("✓ Sesuai kriteria rawat jalan")
+        primary_recommendation = "Rehabilitasi Rawat Jalan"
+    
+    # ==========================================================================
+    # RULE 2: REHABILITASI RAWAT INAP
+    # ==========================================================================
+    elif (skor_medis > 50 and       # Kecanduan berat
+          skor_hukum <= 25 and      # Pengguna atau pengedar sangat kecil
+          (breakdown_medis['Fungsi Sosial']['skor'] >= 8 or 
+           breakdown_medis['Komorbid']['skor'] >= 8)):
         
-        with col2:
-            golongan = st.selectbox("Golongan Narkotika", ["Golongan I", "Golongan II", "Golongan III"])
-            lokasi_bb = st.selectbox("Lokasi Ditemukan BB", 
-                                    ["Pada tubuh", "Di kendaraan", "Di rumah", "Lainnya"])
+        probabilities["Rehabilitasi Rawat Inap"] = 80
+        reasoning.append("✓ Tingkat ketergantungan berat (>50 poin)")
+        reasoning.append("✓ Butuh pengawasan intensif 24 jam")
+        reasoning.append("✓ Gangguan fungsi sosial atau komorbid serius")
+        reasoning.append("✓ Tidak ada bukti penjualan/peredaran besar")
+        primary_recommendation = "Rehabilitasi Rawat Inap"
+    
+    # ==========================================================================
+    # RULE 3: PROSES HUKUM
+    # ==========================================================================
+    elif (skor_hukum > 40 and       # Pengedar/bandar
+          breakdown_hukum['Barang Bukti']['skor'] >= 18 and
+          skor_medis < 40):         # Kecanduan tidak dominan
         
-        # Threshold check (sesuai praktik lapangan)
-        threshold_map = {
-            "Ganja (Cannabis)": 5.0,
-            "Sabu (Methamphetamine)": 1.0,
-            "Ekstasi (MDMA)": 0.5,  # 5 butir ≈ 0.5 gram
-            "Kokain": 1.0,
-            "Heroin": 0.5
-        }
+        probabilities["Proses Hukum"] = 75
+        reasoning.append("✗ Indikasi kuat keterlibatan peredaran")
+        reasoning.append("✗ Barang bukti signifikan")
+        reasoning.append("✗ Tingkat kecanduan tidak dominan")
+        reasoning.append("✗ Memenuhi kriteria tindak pidana peredaran")
+        primary_recommendation = "Proses Hukum"
+    
+    # ==========================================================================
+    # RULE 4: PROSES HUKUM + REHABILITASI (DUAL INTERVENTION)
+    # ==========================================================================
+    elif (skor_medis > 50 and       # Pecandu berat
+          skor_hukum > 30):         # Terlibat peredaran
         
-        threshold = threshold_map.get(jenis_narkotika, 1.0)
-        above_threshold = berat_bb > threshold
-        
-        if above_threshold:
-            st.warning(f"⚠️ BB ({berat_bb}g) **MELEBIHI** threshold end user ({threshold}g)")
-        else:
-            st.success(f"✅ BB ({berat_bb}g) **DI BAWAH** threshold end user ({threshold}g)")
-        
-        st.markdown("---")
-        st.subheader("B. Indikator Pengedaran (Quick Check)")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            alat_timbang = st.checkbox("Alat timbang ditemukan")
-            packaging = st.checkbox("Material packaging ditemukan")
-            hp_multiple = st.checkbox("HP/alat komunikasi multiple")
-        
-        with col2:
-            daftar_transaksi = st.checkbox("Daftar nama/transaksi ditemukan")
-            uang_besar = st.checkbox("Uang tunai dalam jumlah besar")
-            intelijen_jaringan = st.checkbox("Intel: Bagian dari jaringan")
-        
-        indikator_pengedar = sum([alat_timbang, packaging, hp_multiple, 
-                                   daftar_transaksi, uang_besar, intelijen_jaringan])
-        
-        if indikator_pengedar >= 3:
-            st.error(f"🚨 **INDIKASI KUAT PENGEDAR** ({indikator_pengedar}/6 indikator)")
-            peran = "PENGEDAR"
-        else:
-            st.success(f"✅ **INDIKASI END USER** ({indikator_pengedar}/6 indikator)")
-            peran = "END USER"
-        
-        st.markdown("---")
-        st.subheader("C. Rekam Jejak")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            first_offender = st.checkbox("First Offender (belum pernah divonis)", value=True)
-            if not first_offender:
-                jumlah_vonis = st.number_input("Jumlah Vonis Sebelumnya", min_value=1, max_value=10, value=1)
+        probabilities["Proses Hukum + Rehabilitasi"] = 85
+        reasoning.append("! Pecandu berat dengan ketergantungan severe")
+        reasoning.append("! Sekaligus terlibat dalam peredaran narkotika")
+        reasoning.append("! Memerlukan dual intervention:")
+        reasoning.append("  → Rehabilitasi untuk mengatasi kecanduan")
+        reasoning.append("  → Proses hukum untuk aspek peredaran")
+        primary_recommendation = "Proses Hukum + Rehabilitasi"
+    
+    # ==========================================================================
+    # EDGE CASES & REFINEMENT
+    # ==========================================================================
+    else:
+        # Default berdasarkan dominasi skor
+        if skor_medis > skor_hukum * 1.5:  # Medis sangat dominan
+            if skor_medis > 60:
+                probabilities["Rehabilitasi Rawat Inap"] = 70
+                primary_recommendation = "Rehabilitasi Rawat Inap"
+                reasoning.append("✓ Aspek medis sangat dominan (severe addiction)")
             else:
-                jumlah_vonis = 0
+                probabilities["Rehabilitasi Rawat Jalan"] = 65
+                primary_recommendation = "Rehabilitasi Rawat Jalan"
+                reasoning.append("✓ Aspek medis dominan (moderate addiction)")
         
-        with col2:
-            riwayat_rehab = st.number_input("Jumlah Rehabilitasi Sebelumnya", 
-                                           min_value=0, max_value=5, value=0)
-            
-            if riwayat_rehab >= 3:
-                st.error("⚠️ Sudah 3x rehabilitasi (batas maksimal)")
+        elif skor_hukum > skor_medis * 1.5:  # Hukum sangat dominan
+            probabilities["Proses Hukum"] = 70
+            primary_recommendation = "Proses Hukum"
+            reasoning.append("✗ Aspek hukum sangat dominan")
+        
+        else:  # Balanced - perlu evaluasi lebih lanjut
+            probabilities["Proses Hukum + Rehabilitasi"] = 60
+            primary_recommendation = "Proses Hukum + Rehabilitasi"
+            reasoning.append("! Skor medis dan hukum relatif seimbang")
+            reasoning.append("! Perlu evaluasi mendalam Tim Asesmen Terpadu")
     
-    st.markdown("---")
+    # Tambahkan reasoning tambahan berdasarkan SEMA 4/2010
+    if breakdown_hukum['Barang Bukti']['skor'] == 0:
+        reasoning.append("• Barang bukti di bawah gramatur SEMA 4/2010")
     
-    # SECTION 3: GENERATE RECOMMENDATION
-    st.header("3️⃣ REKOMENDASI TAT")
+    if breakdown_hukum['Riwayat Pidana']['skor'] >= 10:
+        reasoning.append("⚠ Catatan: Ada riwayat kasus sebelumnya")
     
-    if st.button("🎯 GENERATE REKOMENDASI", type="primary", use_container_width=True):
-        # Compile data
-        case_data = {
-            # Identitas
-            'nama': nama,
-            'usia': usia,
-            'jenis_kelamin': jenis_kelamin,
-            'pendidikan': pendidikan,
-            'pekerjaan': pekerjaan,
-            'tanggal_asesmen': str(tanggal_asesmen),
-            
-            # Medis
-            'positive_tests': positive_tests,
-            'addiction_score': addiction_score,
-            'addiction_level': addiction_level,
-            'frekuensi': frekuensi,
-            'durasi': durasi,
-            'withdrawal': withdrawal,
-            'toleransi': toleransi,
-            'kondisi_fisik': kondisi_fisik,
-            'gangguan_jiwa': gangguan_jiwa,
-            'dukungan_keluarga': dukungan_keluarga,
-            'motivasi_pulih': motivasi_pulih,
-            
-            # Hukum
-            'jenis_narkotika': jenis_narkotika,
-            'berat_bb': berat_bb,
-            'above_threshold': above_threshold,
-            'indikator_pengedar': indikator_pengedar,
-            'peran': peran,
-            'first_offender': first_offender,
-            'jumlah_vonis': jumlah_vonis,
-            'riwayat_rehab': riwayat_rehab,
-            'golongan': golongan
+    # Normalisasi probabilitas jika ada multiple recommendations
+    total_prob = sum(probabilities.values())
+    if total_prob > 100:
+        probabilities = {k: (v/total_prob)*100 for k, v in probabilities.items()}
+    
+    # Tambahkan probabilitas kecil untuk opsi lain (realistis)
+    remaining = 100 - probabilities[primary_recommendation]
+    other_options = [k for k in probabilities.keys() if k != primary_recommendation]
+    for opt in other_options:
+        probabilities[opt] = remaining / len(other_options)
+    
+    return probabilities, reasoning, primary_recommendation, final_score
+
+# =============================================================================
+# FUNGSI VISUALISASI
+# =============================================================================
+
+def create_gauge_chart(score, title, max_score=100):
+    """Membuat gauge chart untuk visualisasi skor"""
+    fig = go.Figure(go.Indicator(
+        mode = "gauge+number+delta",
+        value = score,
+        domain = {'x': [0, 1], 'y': [0, 1]},
+        title = {'text': title, 'font': {'size': 20}},
+        delta = {'reference': max_score/2},
+        gauge = {
+            'axis': {'range': [None, max_score], 'tickwidth': 1},
+            'bar': {'color': "darkblue"},
+            'steps': [
+                {'range': [0, max_score/3], 'color': "lightgreen"},
+                {'range': [max_score/3, 2*max_score/3], 'color': "yellow"},
+                {'range': [2*max_score/3, max_score], 'color': "salmon"}
+            ],
+            'threshold': {
+                'line': {'color': "red", 'width': 4},
+                'thickness': 0.75,
+                'value': max_score * 0.8
+            }
         }
+    ))
+    fig.update_layout(height=300)
+    return fig
+
+def create_breakdown_chart(breakdown, title):
+    """Membuat horizontal bar chart untuk breakdown skor"""
+    categories = list(breakdown.keys())
+    scores = [breakdown[cat]['skor'] for cat in categories]
+    max_scores = [breakdown[cat]['max'] for cat in categories]
+    
+    fig = go.Figure()
+    
+    # Bar untuk skor aktual
+    fig.add_trace(go.Bar(
+        y=categories,
+        x=scores,
+        name='Skor Aktual',
+        orientation='h',
+        marker=dict(color='#1f77b4'),
+        text=scores,
+        textposition='auto',
+    ))
+    
+    # Bar untuk sisa dari max score
+    fig.add_trace(go.Bar(
+        y=categories,
+        x=[max_scores[i] - scores[i] for i in range(len(scores))],
+        name='Sisa Skor',
+        orientation='h',
+        marker=dict(color='#d3d3d3'),
+        showlegend=False
+    ))
+    
+    fig.update_layout(
+        title=title,
+        barmode='stack',
+        height=400,
+        xaxis_title="Poin",
+        yaxis_title="Kategori",
+        showlegend=True
+    )
+    
+    return fig
+
+def create_probability_chart(probabilities):
+    """Membuat bar chart untuk probabilitas rekomendasi"""
+    categories = list(probabilities.keys())
+    values = list(probabilities.values())
+    
+    colors = ['#28a745' if v == max(values) else '#17a2b8' for v in values]
+    
+    fig = go.Figure(data=[
+        go.Bar(
+            x=categories,
+            y=values,
+            marker_color=colors,
+            text=[f"{v:.1f}%" for v in values],
+            textposition='auto',
+        )
+    ])
+    
+    fig.update_layout(
+        title="Distribusi Probabilitas Rekomendasi",
+        xaxis_title="Jenis Rekomendasi",
+        yaxis_title="Probabilitas (%)",
+        yaxis=dict(range=[0, 100]),
+        height=400
+    )
+    
+    return fig
+
+# =============================================================================
+# APLIKASI UTAMA
+# =============================================================================
+
+def main():
+    # Header
+    st.markdown('<h1 class="main-header">⚖️ SISTEM PREDIKSI TAT BNN</h1>', 
+                unsafe_allow_html=True)
+    st.markdown('<p style="text-align: center; color: #666;">Tools Bantu Tim Asesmen Terpadu - Penanganan Penyalahguna Narkotika</p>', 
+                unsafe_allow_html=True)
+    
+    # Warning Box
+    st.markdown("""
+    <div class="warning-box">
+        <strong>⚠️ PERHATIAN PENTING:</strong><br>
+        Sistem ini adalah <strong>ALAT BANTU</strong> untuk proses asesmen. 
+        Keputusan final tetap berada di tangan <strong>Tim Asesmen Terpadu BNN</strong> 
+        dan aparat penegak hukum yang berwenang.
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Sidebar - Info Regulasi
+    with st.sidebar:
+        st.header("📋 Dasar Hukum")
+        st.markdown("""
+        **Regulasi yang Digunakan:**
+        - UU No. 35 Tahun 2009 tentang Narkotika
+        - SEMA No. 4 Tahun 2010
+        - Peraturan Bersama 7 Instansi (2014)
+        - Perka BNN No. 11 Tahun 2014
         
-        # Calculate final score & recommendation
-        final_score, scoring_details = calculate_tat_score(case_data)
-        recommendation = get_recommendation(final_score, case_data)
-        
-        # Store in session state
-        st.session_state.case_data = case_data
-        st.session_state.case_data['final_score'] = final_score
-        st.session_state.case_data['scoring_details'] = scoring_details
-        st.session_state.recommendation = recommendation
-        
-        # Display results
-        st.success("✅ Rekomendasi berhasil di-generate!")
-        
-        # Score breakdown
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            st.metric("Skor Total", f"{final_score}", 
-                     help="Rentang: -15 hingga +20")
-        with col2:
-            st.metric("Tingkat Kecanduan", addiction_level)
-        with col3:
-            st.metric("Klasifikasi Peran", peran)
+        **Instrumen Asesmen:**
+        - ASAM (6 Dimensi)
+        - DSM-5 (11 Kriteria)
+        - ASSIST
+        - DAST-10
+        """)
         
         st.markdown("---")
+        st.info("**Versi:** 1.0.0\n\n**Update:** Desember 2025")
+    
+    # Tab Layout
+    tab1, tab2, tab3, tab4 = st.tabs([
+        "📝 Input Data", 
+        "📊 Hasil Analisis", 
+        "📈 Visualisasi Detail",
+        "ℹ️ Panduan"
+    ])
+    
+    # ==========================================================================
+    # TAB 1: INPUT DATA
+    # ==========================================================================
+    with tab1:
+        st.header("📋 Input Data Asesmen")
         
-        # REKOMENDASI UTAMA
-        rec_type = recommendation['type']
-        rec_color = recommendation['color']
-        
-        st.markdown(f'<div class="{rec_color}-box">', unsafe_allow_html=True)
-        st.markdown(f"### 📋 REKOMENDASI: **{rec_type}**")
-        st.markdown(recommendation['detail'])
-        st.markdown("</div>", unsafe_allow_html=True)
-        
-        # Program & Durasi
-        if recommendation.get('program'):
-            st.markdown("#### 🎯 Program Rehabilitasi")
-            st.write(recommendation['program'])
-        
-        if recommendation.get('durasi'):
-            st.markdown(f"**Durasi:** {recommendation['durasi']}")
-        
-        if recommendation.get('tempat'):
-            st.markdown(f"**Tempat:** {recommendation['tempat']}")
-        
-        # Monitoring
-        if recommendation.get('monitoring'):
-            st.markdown("#### 📊 Monitoring & Evaluasi")
-            st.write(recommendation['monitoring'])
-        
-        # Dasar Hukum
-        st.markdown("#### ⚖️ Dasar Hukum")
-        st.info(recommendation['dasar_hukum'])
-        
-        # Catatan khusus
-        if recommendation.get('catatan'):
-            st.warning(f"**⚠️ Catatan Khusus:** {recommendation['catatan']}")
-        
-        st.markdown("---")
-        
-        # EXPORT OPTIONS
-        st.subheader("📄 Export Dokumen")
-        col1, col2, col3 = st.columns(3)
+        col1, col2 = st.columns(2)
         
         with col1:
-            if st.button("📥 Download PDF Report", use_container_width=True):
-                pdf_buffer = generate_pdf_report(case_data, recommendation)
-                st.download_button(
-                    label="💾 Simpan PDF",
-                    data=pdf_buffer,
-                    file_name=f"TAT_Report_{nama.replace(' ', '_')}_{tanggal_asesmen}.pdf",
-                    mime="application/pdf",
-                    use_container_width=True
+            st.subheader("🏥 ASESMEN MEDIS")
+            
+            # Informasi Identitas (Opsional - untuk dokumentasi)
+            with st.expander("👤 Informasi Identitas (Opsional)", expanded=False):
+                nama_inisial = st.text_input("Inisial Nama", placeholder="Contoh: AB")
+                usia = st.number_input("Usia", min_value=0, max_value=100, value=25)
+                jenis_kelamin = st.selectbox("Jenis Kelamin", ["Laki-laki", "Perempuan"])
+            
+            st.markdown("---")
+            
+            # 1. Hasil Tes Urine
+            st.markdown("**1️⃣ Hasil Tes Urine/Laboratorium**")
+            zat_positif = st.multiselect(
+                "Zat yang terdeteksi POSITIF:",
+                JENIS_NARKOTIKA,
+                help="Pilih semua zat yang terdeteksi positif dalam tes urine/lab"
+            )
+            
+            st.markdown("---")
+            
+            # 2. Tingkat Kecanduan (DSM-5)
+            st.markdown("**2️⃣ Kriteria DSM-5 (Gangguan Penggunaan Zat)**")
+            st.caption("Berikan tanda centang pada kriteria yang terpenuhi:")
+            
+            dsm5_checked = []
+            for i, criteria in enumerate(DSM5_CRITERIA, 1):
+                if st.checkbox(f"{i}. {criteria}", key=f"dsm5_{i}"):
+                    dsm5_checked.append(criteria)
+            
+            dsm5_count = len(dsm5_checked)
+            
+            # Tampilkan interpretasi
+            if dsm5_count == 0:
+                st.info("Tidak ada kriteria terpenuhi")
+            elif dsm5_count <= 1:
+                st.info(f"**{dsm5_count}/11** - Belum memenuhi kriteria gangguan")
+            elif dsm5_count <= 3:
+                st.warning(f"**{dsm5_count}/11** - Gangguan Penggunaan **RINGAN**")
+            elif dsm5_count <= 5:
+                st.warning(f"**{dsm5_count}/11** - Gangguan Penggunaan **SEDANG**")
+            else:
+                st.error(f"**{dsm5_count}/11** - Gangguan Penggunaan **BERAT**")
+            
+            st.markdown("---")
+            
+            # 3. Durasi Penggunaan
+            st.markdown("**3️⃣ Durasi Penggunaan Narkotika**")
+            durasi_bulan = st.number_input(
+                "Berapa lama sudah menggunakan? (dalam bulan)",
+                min_value=0,
+                max_value=240,
+                value=6,
+                help="Estimasi durasi penggunaan narkotika"
+            )
+            
+            st.markdown("---")
+            
+            # 4. Fungsi Sosial
+            st.markdown("**4️⃣ Status Fungsi Sosial/Okupasional**")
+            fungsi_sosial = st.radio(
+                "Bagaimana fungsi sosial klien saat ini?",
+                [
+                    "Masih produktif (sekolah/kerja)",
+                    "Mulai terganggu",
+                    "Tidak berfungsi sama sekali"
+                ],
+                help="Penilaian terhadap kemampuan menjalankan fungsi sehari-hari"
+            )
+            
+            st.markdown("---")
+            
+            # 5. Komorbid
+            st.markdown("**5️⃣ Kondisi Komorbid (Gangguan Penyerta)**")
+            ada_komorbid = st.checkbox(
+                "Ada gangguan psikiatrik/medis komorbid?",
+                help="Gangguan kesehatan mental atau fisik yang menyertai"
+            )
+            
+            tingkat_komorbid = None
+            if ada_komorbid:
+                tingkat_komorbid = st.radio(
+                    "Tingkat keparahan komorbid:",
+                    ["Ringan", "Berat"],
+                    help="Ringan: gangguan anxietas, depresi ringan, dll.\nBerat: gangguan psikotik, bipolar, penyakit fisik serius"
                 )
         
         with col2:
-            if st.button("💾 Simpan ke Database", use_container_width=True):
-                save_case(case_data, recommendation)
-                st.success("✅ Data tersimpan!")
-        
-        with col3:
-            if st.button("📋 Copy JSON", use_container_width=True):
-                json_data = json.dumps(case_data, indent=2, ensure_ascii=False)
-                st.code(json_data, language='json')
-
-# ============================================================================
-# MENU 2: DASHBOARD & STATISTIK
-# ============================================================================
-elif menu == "📊 Dashboard & Statistik":
-    st.markdown('<p class="main-header">📊 DASHBOARD & STATISTIK TAT</p>', unsafe_allow_html=True)
-    
-    # Load data
-    cases = load_cases()
-    
-    if len(cases) == 0:
-        st.info("Belum ada data kasus. Silakan input asesmen terlebih dahulu.")
-    else:
-        # Summary metrics
-        stats = get_statistics(cases)
-        
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Total Kasus", stats['total_cases'])
-        with col2:
-            st.metric("Rekomendasi Rehabilitasi", f"{stats['rehab_percentage']:.1f}%")
-        with col3:
-            st.metric("Rata-rata Usia", f"{stats['avg_age']:.1f} tahun")
-        with col4:
-            st.metric("First Offender", f"{stats['first_offender_percentage']:.1f}%")
-        
-        st.markdown("---")
-        
-        # Charts
-        tab1, tab2, tab3 = st.tabs(["📈 Distribusi Rekomendasi", "🎯 Tingkat Kecanduan", "⚖️ Jenis Narkotika"])
-        
-        with tab1:
-            import plotly.express as px
+            st.subheader("⚖️ ASESMEN HUKUM")
             
-            rec_counts = pd.DataFrame(stats['recommendation_distribution'].items(), 
-                                     columns=['Rekomendasi', 'Jumlah'])
-            fig = px.pie(rec_counts, values='Jumlah', names='Rekomendasi', 
-                        title='Distribusi Rekomendasi TAT')
-            st.plotly_chart(fig, use_container_width=True)
+            # 1. Peran dalam Kasus
+            st.markdown("**1️⃣ Peran Tersangka/Terdakwa**")
+            peran = st.selectbox(
+                "Indikasi peran dalam kasus:",
+                [
+                    "Pengguna murni (untuk diri sendiri)",
+                    "Berbagi dengan teman (sharing)",
+                    "Kurir/pengedar kecil",
+                    "Pengedar besar/bandar"
+                ],
+                help="Berdasarkan hasil investigasi dan keterangan"
+            )
+            
+            st.markdown("---")
+            
+            # 2. Barang Bukti
+            st.markdown("**2️⃣ Barang Bukti Narkotika**")
+            jenis_narkotika = st.selectbox(
+                "Jenis narkotika yang disita:",
+                list(GRAMATUR_LIMITS.keys()),
+                help="Pilih jenis narkotika sesuai barang bukti"
+            )
+            
+            gramatur_limit = GRAMATUR_LIMITS[jenis_narkotika]
+            
+            barang_bukti = st.number_input(
+                f"Jumlah barang bukti (gram):",
+                min_value=0.0,
+                max_value=1000.0,
+                value=0.5,
+                step=0.1,
+                help=f"Gramatur SEMA 4/2010 untuk {jenis_narkotika}: ≤ {gramatur_limit}g"
+            )
+            
+            # Tampilkan status gramatur
+            if barang_bukti < gramatur_limit:
+                st.success(f"✓ Di bawah gramatur SEMA (< {gramatur_limit}g)")
+            elif barang_bukti <= gramatur_limit * 2:
+                st.warning(f"⚠ Mendekati/sedikit di atas gramatur SEMA")
+            else:
+                st.error(f"✗ Jauh melebihi gramatur SEMA (> {gramatur_limit}g)")
+            
+            st.markdown("---")
+            
+            # 3. Status Penangkapan
+            st.markdown("**3️⃣ Status Penangkapan**")
+            status_tangkap = st.selectbox(
+                "Bagaimana klien ditangkap/datang?",
+                [
+                    "Sukarela datang untuk asesmen",
+                    "Operasi targeted (penggerebekan terencana)",
+                    "Tertangkap tangan saat transaksi"
+                ],
+                help="Modus penangkapan/kedatangan klien"
+            )
+            
+            st.markdown("---")
+            
+            # 4. Riwayat Pidana
+            st.markdown("**4️⃣ Riwayat Pidana/Rehabilitasi**")
+            riwayat_pidana = st.radio(
+                "Status riwayat kasus sebelumnya:",
+                [
+                    "First offender (pertama kali)",
+                    "Pernah rehab sebelumnya (relapse)",
+                    "Residivis kasus narkotika"
+                ],
+                help="Riwayat keterlibatan kasus narkotika sebelumnya"
+            )
         
-        with tab2:
-            addiction_counts = pd.DataFrame(stats['addiction_level_distribution'].items(),
-                                           columns=['Tingkat', 'Jumlah'])
-            fig = px.bar(addiction_counts, x='Tingkat', y='Jumlah',
-                        title='Distribusi Tingkat Kecanduan',
-                        color='Tingkat',
-                        color_discrete_map={'RINGAN': 'green', 'SEDANG': 'orange', 'BERAT': 'red'})
-            st.plotly_chart(fig, use_container_width=True)
-        
-        with tab3:
-            drug_counts = pd.DataFrame(stats['drug_type_distribution'].items(),
-                                      columns=['Jenis', 'Jumlah'])
-            fig = px.bar(drug_counts, x='Jenis', y='Jumlah',
-                        title='Distribusi Jenis Narkotika')
-            st.plotly_chart(fig, use_container_width=True)
-        
+        # Tombol Analisis
         st.markdown("---")
-        
-        # Detailed table
-        st.subheader("📋 Daftar Kasus")
-        df_cases = pd.DataFrame(cases)
-        df_display = df_cases[['nama', 'usia', 'jenis_narkotika', 'addiction_level', 
-                               'peran', 'final_score', 'tanggal_asesmen']]
-        st.dataframe(df_display, use_container_width=True)
-
-# ============================================================================
-# MENU 3: PANDUAN HUKUM
-# ============================================================================
-elif menu == "📚 Panduan Hukum":
-    st.markdown('<p class="main-header">📚 PANDUAN HUKUM TAT</p>', unsafe_allow_html=True)
+        col_btn1, col_btn2, col_btn3 = st.columns([1, 1, 1])
+        with col_btn2:
+            analyze_button = st.button(
+                "🔍 ANALISIS & PREDIKSI",
+                use_container_width=True,
+                type="primary"
+            )
     
-    tab1, tab2, tab3, tab4 = st.tabs(["⚖️ Dasar Hukum", "📊 Threshold BB", "🎯 Algoritma Scoring", "📝 Template Dokumen"])
-    
-    with tab1:
-        st.subheader("Dasar Hukum TAT")
-        
-        st.markdown("""
-        ### 1. UU No. 35 Tahun 2009 (Narkotika)
-        - **Pasal 54**: Pecandu dan korban penyalahguna WAJIB rehabilitasi
-        - **Pasal 103**: Masa rehabilitasi diperhitungkan sebagai masa menjalani hukuman
-        - **Pasal 127**: Sanksi penyalahguna (max 4 tahun Gol I)
-        
-        ### 2. KUHP Nasional (UU No. 1 Tahun 2023)
-        - **Pasal 103**: Rehabilitasi sebagai pidana alternatif
-        - **Pasal 105**: Rehabilitasi untuk pecandu narkotika
-        - **Berlaku**: 2 Januari 2026
-        
-        ### 3. UU Penyesuaian Pidana (2025)
-        - Menghapus pidana minimum khusus
-        - Sanksi kumulatif alternatif (dan/atau)
-        - Hakim punya diskresi penuh (0 tahun - maksimum)
-        
-        ### 4. Pedoman Jaksa Agung No. 18 Tahun 2021
-        - **Prioritas rehabilitasi** atas penuntutan
-        - "**HARAM** melimpahkan pecandu ke persidangan"
-        - Maksimal 3x rehabilitasi, kali ke-4 baru dilimpahkan
-        
-        ### 5. Peraturan Bersama 7 Instansi (2014)
-        - Mekanisme TAT (Tim Asesmen Terpadu)
-        - Komposisi: Tim Medis + Tim Hukum
-        - Timeline: Max 2x24 jam selesai
-        """)
-    
+    # ==========================================================================
+    # TAB 2: HASIL ANALISIS
+    # ==========================================================================
     with tab2:
-        st.subheader("Threshold Barang Bukti End User")
+        if 'analyze_button' in locals() and analyze_button:
+            with st.spinner('🔄 Melakukan analisis...'):
+                # Hitung skor
+                skor_medis, breakdown_medis = calculate_medical_score(
+                    zat_positif, dsm5_count, durasi_bulan, 
+                    fungsi_sosial, ada_komorbid, tingkat_komorbid
+                )
+                
+                skor_hukum, breakdown_hukum = calculate_legal_score(
+                    peran, barang_bukti, jenis_narkotika,
+                    status_tangkap, riwayat_pidana
+                )
+                
+                probabilities, reasoning, primary_rec, final_score = apply_decision_rules(
+                    skor_medis, skor_hukum, breakdown_medis, breakdown_hukum
+                )
+                
+                # Simpan ke session state untuk digunakan di tab lain
+                st.session_state['results'] = {
+                    'skor_medis': skor_medis,
+                    'skor_hukum': skor_hukum,
+                    'breakdown_medis': breakdown_medis,
+                    'breakdown_hukum': breakdown_hukum,
+                    'probabilities': probabilities,
+                    'reasoning': reasoning,
+                    'primary_rec': primary_rec,
+                    'final_score': final_score,
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+            
+            st.success("✅ Analisis selesai!")
+            
+        # Tampilkan hasil jika sudah ada di session state
+        if 'results' in st.session_state:
+            results = st.session_state['results']
+            
+            st.header("📊 HASIL ANALISIS TAT")
+            st.caption(f"Waktu Analisis: {results['timestamp']}")
+            
+            # Tampilkan Skor Utama
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric(
+                    "Skor Asesmen Medis",
+                    f"{results['skor_medis']}/100",
+                    delta="60% bobot" if results['skor_medis'] > 50 else None
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric(
+                    "Skor Asesmen Hukum",
+                    f"{results['skor_hukum']}/100",
+                    delta="40% bobot" if results['skor_hukum'] > 50 else None
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col3:
+                st.markdown('<div class="metric-card">', unsafe_allow_html=True)
+                st.metric(
+                    "Composite Score",
+                    f"{results['final_score']:.1f}/100",
+                    delta="Weighted"
+                )
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Rekomendasi Utama
+            st.markdown("### 🎯 REKOMENDASI UTAMA")
+            
+            confidence = results['probabilities'][results['primary_rec']]
+            
+            if "Rehabilitasi" in results['primary_rec'] and "Hukum" not in results['primary_rec']:
+                box_class = "success-box"
+                icon = "✅"
+            elif "Proses Hukum" == results['primary_rec']:
+                box_class = "warning-box"
+                icon = "⚠️"
+            else:
+                box_class = "info-box"
+                icon = "ℹ️"
+            
+            st.markdown(f"""
+            <div class="{box_class}">
+                <h2 style="margin: 0;">{icon} {results['primary_rec']}</h2>
+                <p style="font-size: 1.2rem; margin: 0.5rem 0;">
+                    <strong>Tingkat Keyakinan: {confidence:.1f}%</strong>
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            st.markdown("---")
+            
+            # Reasoning
+            st.markdown("### 📝 ALASAN & PERTIMBANGAN")
+            
+            for reason in results['reasoning']:
+                if reason.startswith("✓"):
+                    st.success(reason)
+                elif reason.startswith("✗"):
+                    st.error(reason)
+                elif reason.startswith("!"):
+                    st.warning(reason)
+                elif reason.startswith("•") or reason.startswith("⚠"):
+                    st.info(reason)
+                else:
+                    st.write(reason)
+            
+            st.markdown("---")
+            
+            # Distribusi Probabilitas
+            st.markdown("### 📊 Distribusi Probabilitas Semua Rekomendasi")
+            
+            # Tampilkan sebagai tabel
+            prob_df = pd.DataFrame({
+                'Rekomendasi': list(results['probabilities'].keys()),
+                'Probabilitas (%)': [f"{v:.1f}%" for v in results['probabilities'].values()],
+                'Status': ['✅ PRIMARY' if k == results['primary_rec'] else '◻️ Alternative' 
+                          for k in results['probabilities'].keys()]
+            })
+            st.dataframe(prob_df, use_container_width=True, hide_index=True)
+            
+            # Visualisasi
+            fig_prob = create_probability_chart(results['probabilities'])
+            st.plotly_chart(fig_prob, use_container_width=True)
+            
+            st.markdown("---")
+            
+            # Catatan Penting
+            st.markdown("""
+            <div class="info-box">
+                <strong>📌 CATATAN PENTING:</strong><br>
+                • Rekomendasi ini bersifat <strong>informatif dan membantu</strong> proses asesmen<br>
+                • Keputusan final harus melalui <strong>Case Conference TAT</strong><br>
+                • Pertimbangkan faktor kontekstual lain yang tidak tercakup dalam sistem<br>
+                • Konsultasikan dengan tim dokter, psikolog, dan penegak hukum
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Export Data
+            st.markdown("---")
+            st.markdown("### 💾 Export Hasil Analisis")
+            
+            export_data = {
+                "timestamp": results['timestamp'],
+                "skor_medis": results['skor_medis'],
+                "skor_hukum": results['skor_hukum'],
+                "final_score": results['final_score'],
+                "rekomendasi_utama": results['primary_rec'],
+                "confidence": results['probabilities'][results['primary_rec']],
+                "breakdown_medis": results['breakdown_medis'],
+                "breakdown_hukum": results['breakdown_hukum'],
+                "probabilities": results['probabilities'],
+                "reasoning": results['reasoning']
+            }
+            
+            json_str = json.dumps(export_data, indent=2, ensure_ascii=False)
+            
+            col_exp1, col_exp2 = st.columns(2)
+            with col_exp1:
+                st.download_button(
+                    label="📥 Download JSON",
+                    data=json_str,
+                    file_name=f"TAT_Analysis_{results['timestamp'].replace(':', '-')}.json",
+                    mime="application/json"
+                )
         
-        st.markdown("""
-        Berdasarkan praktik lapangan dan pedoman tidak tertulis:
-        """)
-        
-        threshold_data = {
-            'Jenis Narkotika': ['Ganja (Cannabis)', 'Sabu (Methamphetamine)', 
-                               'Ekstasi (MDMA)', 'Kokain', 'Heroin'],
-            'Threshold (gram)': [5.0, 1.0, 0.5, 1.0, 0.5],
-            'Basis Perhitungan': ['10x pakai @ 0.5g', '10x pakai @ 0.1g', 
-                                  '5 butir @ 0.1g', '10x pakai @ 0.1g', '5x pakai @ 0.1g'],
-            'Keterangan': ['Di atas 5g → indikasi pengedar', 
-                          'Di atas 1g → indikasi pengedar',
-                          'Di atas 5 butir → indikasi pengedar',
-                          'Di atas 1g → indikasi pengedar',
-                          'Di atas 0.5g → indikasi pengedar']
-        }
-        
-        df_threshold = pd.DataFrame(threshold_data)
-        st.table(df_threshold)
-        
-        st.warning("""
-        ⚠️ **CATATAN PENTING:**
-        - Threshold ini BUKAN aturan resmi, tetapi praktik lapangan
-        - Perlu dikeluarkan Peraturan BNN/PP yang menetapkan threshold resmi
-        - Digunakan sebagai SALAH SATU pertimbangan, bukan satu-satunya
-        """)
+        else:
+            st.info("👈 Silakan isi data di tab **Input Data** dan klik tombol **Analisis & Prediksi**")
     
+    # ==========================================================================
+    # TAB 3: VISUALISASI DETAIL
+    # ==========================================================================
     with tab3:
-        st.subheader("Algoritma Scoring TAT")
+        if 'results' in st.session_state:
+            results = st.session_state['results']
+            
+            st.header("📈 VISUALISASI DETAIL")
+            
+            # Gauge Charts untuk Skor
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                fig_medis = create_gauge_chart(
+                    results['skor_medis'],
+                    "Skor Asesmen Medis"
+                )
+                st.plotly_chart(fig_medis, use_container_width=True)
+            
+            with col2:
+                fig_hukum = create_gauge_chart(
+                    results['skor_hukum'],
+                    "Skor Asesmen Hukum"
+                )
+                st.plotly_chart(fig_hukum, use_container_width=True)
+            
+            st.markdown("---")
+            
+            # Breakdown Charts
+            fig_breakdown_medis = create_breakdown_chart(
+                results['breakdown_medis'],
+                "Breakdown Skor Asesmen Medis"
+            )
+            st.plotly_chart(fig_breakdown_medis, use_container_width=True)
+            
+            st.markdown("---")
+            
+            fig_breakdown_hukum = create_breakdown_chart(
+                results['breakdown_hukum'],
+                "Breakdown Skor Asesmen Hukum"
+            )
+            st.plotly_chart(fig_breakdown_hukum, use_container_width=True)
+            
+            st.markdown("---")
+            
+            # Tabel Detail Breakdown
+            st.markdown("### 📋 Detail Breakdown Skor")
+            
+            col_table1, col_table2 = st.columns(2)
+            
+            with col_table1:
+                st.markdown("**Asesmen Medis:**")
+                medis_detail = []
+                for kategori, data in results['breakdown_medis'].items():
+                    medis_detail.append({
+                        'Kategori': kategori,
+                        'Skor': f"{data['skor']}/{data['max']}",
+                        'Detail': data['detail']
+                    })
+                st.dataframe(pd.DataFrame(medis_detail), use_container_width=True, hide_index=True)
+            
+            with col_table2:
+                st.markdown("**Asesmen Hukum:**")
+                hukum_detail = []
+                for kategori, data in results['breakdown_hukum'].items():
+                    hukum_detail.append({
+                        'Kategori': kategori,
+                        'Skor': f"{data['skor']}/{data['max']}",
+                        'Detail': data['detail']
+                    })
+                st.dataframe(pd.DataFrame(hukum_detail), use_container_width=True, hide_index=True)
         
-        st.markdown("""
-        ### Faktor yang Mendukung REHABILITASI (+)
-        - [+3] Usia < 25 tahun
-        - [+3] First offender
-        - [+2] BB di bawah threshold
-        - [+2] Tidak ada indikator pengedaran (<3 indikator)
-        - [+2] Motivasi pulih tinggi (≥7)
-        - [+2] Dukungan keluarga kuat
-        - [+1] Kondisi fisik baik
-        
-        ### Faktor yang Mendukung PROSES HUKUM (-)
-        - [-5] Indikasi pengedar (≥3 indikator)
-        - [-4] Residivis narkotika
-        - [-3] BB >> threshold (>2x threshold)
-        - [-3] Sudah 3x rehabilitasi
-        - [-2] Kecanduan berat
-        - [-1] Motivasi pulih rendah
-        
-        ### Interpretasi Skor Akhir
-        - **≥ 8**: Rehabilitasi Prioritas Tinggi
-        - **4-7**: Rehabilitasi dengan Monitoring Ketat
-        - **0-3**: Rehabilitasi di Lapas/Rutan atau Proses Hukum dengan Catatan
-        - **< 0**: Proses Hukum Penuh (Pengedar/Bandar)
-        """)
-        
-        st.info("""
-        💡 **Tips Penggunaan:**
-        - Algoritma ini adalah PANDUAN, bukan keputusan final
-        - Tim TAT tetap harus mempertimbangkan faktor kontekstual
-        - Keputusan akhir adalah tanggung jawab Tim TAT secara kolektif
-        """)
+        else:
+            st.info("👈 Silakan isi data di tab **Input Data** dan klik tombol **Analisis & Prediksi**")
     
+    # ==========================================================================
+    # TAB 4: PANDUAN
+    # ==========================================================================
     with tab4:
-        st.subheader("Template Dokumen TAT")
+        st.header("ℹ️ PANDUAN PENGGUNAAN SISTEM")
         
-        doc_type = st.selectbox("Pilih Template",
-                               ["Berita Acara TAT", "Surat Rekomendasi", 
-                                "Surat Penghentian Penyidikan (SP3)"])
+        # Penjelasan Umum
+        st.markdown("""
+        ### 📖 Tentang Sistem TAT Predictor
         
-        if doc_type == "Berita Acara TAT":
-            st.markdown("""BERITA ACARA
-            TIM ASESMEN TERPADU (TAT)
-            
-            Nomor: BA-TAT/[WILAYAH]/[NOMOR]/[BULAN]/[TAHUN]
-            
-            Pada hari ini [Hari], tanggal [Tanggal] [Bulan] [Tahun], bertempat 
-            di [Lokasi], telah dilakukan Asesmen Terpadu terhadap:
-            
-            Nama            : [Nama Lengkap]
-            Tempat/Tgl Lahir: [Tempat, Tanggal]
-            Jenis Kelamin   : [L/P]
-            Pekerjaan       : [Pekerjaan]
-            Alamat          : [Alamat Lengkap]
-            
-            Tersangka dalam perkara: Pasal [Nomor Pasal] UU No. 35 Tahun 2009
-            tentang Narkotika dengan barang bukti: [Jenis & Jumlah]
-            
-            HASIL ASESMEN MEDIS:
-            1. Tes Urine         : [Positif/Negatif] untuk [Jenis Zat]
-            2. Tingkat Kecanduan : [Ringan/Sedang/Berat]
-            3. Kondisi Kesehatan : [Deskripsi]
-            4. Dukungan Keluarga : [Kuat/Sedang/Lemah]
-            
-            HASIL ASESMEN HUKUM:
-            1. Barang Bukti      : [Jumlah & Jenis]
-            2. Indikasi Peran    : [End User/Pengedar]
-            3. Rekam Jejak       : [First Offender/Residivis]
-            4. Riwayat Rehabilitasi: [Jumlah kali]
-            
-            REKOMENDASI TIM ASESMEN TERPADU:
-            Berdasarkan hasil asesmen di atas, Tim merekomendasikan:
-            [REHABILITASI RAWAT JALAN / RAWAT INAP / PROSES HUKUM]
-            
-            dengan pertimbangan: [Alasan singkat]
-            
-            Demikian Berita Acara ini dibuat dengan sebenarnya.
-            
-            TIM ASESMEN TERPADU
-            
-            Tim Medis,                          Tim Hukum,
-            
-            1. [Nama]                          1. [Nama]
-               [Jabatan]                          [Jabatan/Institusi]
-            
-            2. [Nama]                          2. [Nama]
-               [Jabatan]                          [Jabatan/Institusi]
-            
-            Mengetahui,
-            Ketua TAT,
-            
-            [Nama]
-            [Jabatan]
-```
-            """)
+        Sistem ini dirancang sebagai **alat bantu** untuk Tim Asesmen Terpadu (TAT) dalam 
+        melakukan asesmen terhadap tersangka/terdakwa penyalahguna narkotika. Sistem menggunakan 
+        pendekatan **rule-based scoring** yang transparan dan dapat dipertanggungjawabkan.
+        """)
         
-        elif doc_type == "Surat Rekomendasi":
+        st.markdown("---")
+        
+        # Dasar Hukum
+        with st.expander("⚖️ DASAR HUKUM & REGULASI", expanded=True):
             st.markdown("""
-```
-            SURAT REKOMENDASI
-            TIM ASESMEN TERPADU (TAT)
+            #### Landasan Hukum:
             
-            Nomor: SR-TAT/[WILAYAH]/[NOMOR]/[BULAN]/[TAHUN]
+            1. **UU No. 35 Tahun 2009** tentang Narkotika
+               - Pasal 54: Kewajiban rehab untuk pecandu
+               - Pasal 103: Hakim dapat menetapkan rehabilitasi
+               - Pasal 127: Penyalahguna dapat direhabilitasi
             
-            Kepada Yth.
-            [Jaksa Penuntut Umum / Penyidik]
-            [Nama Institusi]
-            di [Tempat]
+            2. **SEMA No. 4 Tahun 2010**
+               - Kriteria penempatan ke lembaga rehabilitasi
+               - Gramatur maksimal per jenis narkotika
             
-            Perihal: Rekomendasi Rehabilitasi
+            3. **Peraturan Bersama 7 Instansi (2014)**
+               - Tata cara penanganan pecandu narkotika
+               - Prosedur asesmen terpadu
             
-            Dengan hormat,
+            4. **Perka BNN No. 11 Tahun 2014**
+               - Tata cara penanganan tersangka pecandu
+               - Mekanisme TAT
             
-            Berdasarkan hasil Asesmen Terpadu yang telah dilaksanakan pada 
-            tanggal [Tanggal] terhadap:
+            #### Instrumen Asesmen Internasional:
             
-            Nama            : [Nama Lengkap]
-            Tersangka perkara: Pasal [Nomor] UU No. 35 Tahun 2009
-            
-            Dengan mempertimbangkan:
-            1. Pasal 54 UU No. 35 Tahun 2009 (Rehabilitasi wajib bagi pecandu)
-            2. Pasal 103 KUHP Nasional (Rehabilitasi sebagai pidana alternatif)
-            3. Pedoman Jaksa Agung No. 18 Tahun 2021
-            4. Hasil asesmen medis: Tingkat kecanduan [Ringan/Sedang/Berat]
-            5. Hasil asesmen hukum: [Alasan]
-            
-            Maka Tim Asesmen Terpadu MEREKOMENDASIKAN:
-            
-            REHABILITASI [RAWAT JALAN / RAWAT INAP]
-            
-            Program  : [Deskripsi program]
-            Tempat   : [Nama IPWL]
-            Durasi   : [Durasi]
-            Monitoring: Tes urine berkala setiap [Interval]
-            
-            Berdasarkan rekomendasi ini, kami mohon agar:
-            [Untuk Penyidik: Diterbitkan SP3 dengan syarat rehabilitasi]
-            [Untuk JPU: Penghentian penuntutan dengan syarat rehabilitasi]
-            
-            Demikian surat rekomendasi ini dibuat untuk dapat dipergunakan 
-            sebagaimana mestinya.
-            
-            [Kota], [Tanggal]
-            Ketua Tim Asesmen Terpadu,
-            
-            [Nama]
-            [Jabatan]
-            
-            Tembusan:
-            1. Kepala BNN [Provinsi/Kabupaten/Kota]
-            2. [IPWL yang ditunjuk]
-            3. Yang bersangkutan
-```
+            - **ASAM** (American Society of Addiction Medicine) - 6 Dimensi
+            - **DSM-5** - 11 Kriteria Gangguan Penggunaan Zat
+            - **ASSIST** (Alcohol, Smoking and Substance Involvement Screening Test)
+            - **DAST-10** (Drug Abuse Screening Test)
+            - **ASI** (Addiction Severity Index)
             """)
         
-        else:  # SP3
+        # Kriteria SEMA
+        with st.expander("📏 KRITERIA SEMA 4/2010 (Gramatur Narkotika)", expanded=False):
             st.markdown("""
-```
-            SURAT PERINTAH PENGHENTIAN PENYIDIKAN
-            (SP3)
+            #### Gramatur Maksimal untuk Rehabilitasi:
             
-            Nomor: SP3/[NOMOR]/[BULAN]/[TAHUN]/[SATKER]
-            
-            Menimbang:
-            a. Bahwa telah dilakukan penyidikan terhadap tersangka [Nama] 
-               dalam perkara dugaan Pasal [Nomor] UU No. 35 Tahun 2009;
-            b. Bahwa berdasarkan hasil Tim Asesmen Terpadu (TAT) tanggal 
-               [Tanggal], tersangka diklasifikasikan sebagai pecandu/
-               penyalahguna narkotika;
-            c. Bahwa sesuai Pasal 54 UU No. 35 Tahun 2009, pecandu WAJIB 
-               menjalani rehabilitasi medis dan sosial;
-            d. Bahwa sesuai Pedoman Jaksa Agung No. 18 Tahun 2021, prioritas 
-               penanganan penyalahguna adalah rehabilitasi;
-            
-            Mengingat:
-            1. UU No. 35 Tahun 2009 tentang Narkotika
-            2. KUHAP (Pasal 109 ayat 2)
-            3. Pasal 103 KUHP Nasional (UU No. 1 Tahun 2023)
-            4. Pedoman Jaksa Agung No. 18 Tahun 2021
-            5. Peraturan Bersama 7 Instansi tahun 2014
-            6. Hasil Rekomendasi TAT
-            
-            MEMUTUSKAN:
-            
-            MENETAPKAN:
-            
-            Pertama   : Menghentikan penyidikan terhadap tersangka [Nama] 
-                        dalam perkara dugaan Pasal [Nomor] UU No. 35 Tahun 
-                        2009 tentang Narkotika.
-            
-            Kedua     : Tersangka [Nama] WAJIB menjalani program rehabilitasi 
-                        [rawat jalan/rawat inap] di [Nama IPWL] selama 
-                        [Durasi].
-            
-            Ketiga    : Apabila tersangka tidak menjalani atau drop out dari 
-                        program rehabilitasi, maka penyidikan dapat dilanjutkan 
-                        kembali.
-            
-            Keempat   : Surat Perintah ini mulai berlaku sejak tanggal 
-                        ditetapkan.
-            
-            Ditetapkan di : [Kota]
-            Pada tanggal  : [Tanggal]
-            
-            [Jabatan Penyidik]
-            
-            [Nama]
-            [Pangkat/NRP]
-            
-            Tembusan:
-            1. Jaksa Penuntut Umum
-            2. Kepala BNN [Provinsi/Kab/Kota]
-            3. [IPWL yang ditunjuk]
-            4. Tersangka/Keluarga
-            5. Arsip
-```
+            Berdasarkan SEMA No. 4 Tahun 2010, berikut adalah batas maksimal barang bukti 
+            yang dapat dipertimbangkan untuk rehabilitasi:
             """)
+            
+            gramatur_df = pd.DataFrame({
+                'Jenis Narkotika': list(GRAMATUR_LIMITS.keys()),
+                'Batas Maksimal': [f"≤ {v}g" for v in GRAMATUR_LIMITS.values()],
+                'Catatan': [
+                    'Untuk ganja kering/daun',
+                    'Kristal metamfetamin',
+                    'Heroin/putaw dalam bentuk murni',
+                    'Kokain murni',
+                    'Tablet ekstasi @ 0,3g = 8 butir',
+                    'Morfin dalam bentuk murni',
+                    'Kodein dalam bentuk tablet',
+                    'Disesuaikan dengan jenis'
+                ]
+            })
+            
+            st.dataframe(gramatur_df, use_container_width=True, hide_index=True)
+            
+            st.warning("""
+            ⚠️ **PENTING:** Gramatur di atas adalah **pedoman umum**. Hakim tetap memiliki 
+            kewenangan untuk mempertimbangkan faktor-faktor lain dalam memutuskan rehabilitasi.
+            """)
+        
+        # Kriteria DSM-5
+        with st.expander("🧠 KRITERIA DSM-5 (Gangguan Penggunaan Zat)", expanded=False):
+            st.markdown("""
+            #### 11 Kriteria Diagnostik DSM-5:
+            
+            Sistem DSM-5 menggunakan 11 kriteria untuk mendiagnosis gangguan penggunaan zat.
+            Tingkat keparahan ditentukan berdasarkan jumlah kriteria yang terpenuhi:
+            """)
+            
+            for i, criteria in enumerate(DSM5_CRITERIA, 1):
+                st.markdown(f"{i}. {criteria}")
+            
+            st.markdown("""
+            #### Interpretasi Tingkat Keparahan:
+            
+            - **0-1 kriteria**: Tidak ada gangguan
+            - **2-3 kriteria**: Gangguan Penggunaan **RINGAN** (Mild)
+            - **4-5 kriteria**: Gangguan Penggunaan **SEDANG** (Moderate)
+            - **6+ kriteria**: Gangguan Penggunaan **BERAT** (Severe)
+            
+            Semakin banyak kriteria yang terpenuhi, semakin berat tingkat kecanduan
+            dan semakin mendesak kebutuhan untuk rehabilitasi intensif.
+            """)
+        
+        # ASAM 6 Dimensi
+        with st.expander("🏥 ASAM 6 DIMENSI", expanded=False):
+            st.markdown("""
+            #### American Society of Addiction Medicine (ASAM) Criteria:
+            
+            ASAM menggunakan 6 dimensi untuk menilai tingkat keparahan dan menentukan 
+            level perawatan yang tepat:
+            
+            1. **Dimensi 1**: Intoxication Akut dan/atau Potensi Withdrawal
+               - Gejala fisik penggunaan atau putus zat
+               - Risiko komplikasi medis
+            
+            2. **Dimensi 2**: Kondisi dan Komplikasi Biomedis
+               - Penyakit fisik yang menyertai
+               - Kebutuhan perawatan medis
+            
+            3. **Dimensi 3**: Kondisi Emosional, Behavioral, Kognitif
+               - Gangguan mental komorbid
+               - Risiko bunuh diri atau membahayakan orang lain
+            
+            4. **Dimensi 4**: Kesiapan untuk Berubah
+               - Motivasi untuk pulih
+               - Resistensi terhadap perawatan
+            
+            5. **Dimensi 5**: Potensi Relapse, Continued Use, atau Continued Problem
+               - Riwayat relapse sebelumnya
+               - Faktor risiko kambuh
+            
+            6. **Dimensi 6**: Lingkungan Pemulihan/Hidup
+               - Dukungan sosial dan keluarga
+               - Lingkungan yang kondusif untuk pemulihan
+            
+            #### Level Perawatan ASAM:
+            
+            - **Level 0.5**: Intervensi awal
+            - **Level 1**: Rawat jalan (outpatient)
+            - **Level 2**: Intensive outpatient / Partial hospitalization
+            - **Level 3**: Residential / Inpatient
+            - **Level 4**: Medically-managed intensive inpatient
+            """)
+        
+        st.markdown("---")
+        
+        # Cara Penggunaan
+        with st.expander("📝 CARA PENGGUNAAN SISTEM", expanded=True):
+            st.markdown("""
+            ### Langkah-langkah Penggunaan:
+            
+            #### 1. **Persiapan Data**
+            Kumpulkan semua informasi yang diperlukan:
+            - Hasil tes urine/laboratorium
+            - Hasil wawancara klinis (untuk kriteria DSM-5)
+            - Data durasi penggunaan
+            - Penilaian fungsi sosial/okupasional
+            - Informasi komorbid (jika ada)
+            - Data barang bukti dan peran dalam kasus
+            - Status penangkapan
+            - Riwayat pidana/rehabilitasi
+            
+            #### 2. **Input Data di Tab "Input Data"**
+            
+            **Bagian Asesmen Medis:**
+            - Pilih zat yang terdeteksi positif (bisa multiple)
+            - Centang kriteria DSM-5 yang terpenuhi berdasarkan wawancara
+            - Input durasi penggunaan dalam bulan
+            - Pilih status fungsi sosial saat ini
+            - Tandai jika ada gangguan komorbid dan tingkat keparahannya
+            
+            **Bagian Asesmen Hukum:**
+            - Pilih peran tersangka dalam kasus
+            - Input jenis dan jumlah barang bukti (dalam gram)
+            - Pilih status penangkapan
+            - Pilih riwayat pidana/rehabilitasi
+            
+            #### 3. **Klik "Analisis & Prediksi"**
+            Sistem akan:
+            - Menghitung skor medis (0-100)
+            - Menghitung skor hukum (0-100)
+            - Menerapkan decision rules
+            - Menghasilkan probabilitas untuk setiap rekomendasi
+            
+            #### 4. **Review Hasil di Tab "Hasil Analisis"**
+            Lihat:
+            - Rekomendasi utama dengan tingkat keyakinan
+            - Alasan dan pertimbangan
+            - Distribusi probabilitas
+            - Export data jika diperlukan
+            
+            #### 5. **Analisis Lebih Dalam di Tab "Visualisasi Detail"**
+            Explore:
+            - Gauge chart untuk skor keseluruhan
+            - Breakdown detail per kategori
+            - Perbandingan komponen skor
+            
+            #### 6. **Case Conference**
+            - Gunakan hasil sebagai bahan diskusi TAT
+            - Pertimbangkan faktor kontekstual lain
+            - Tim TAT membuat keputusan final
+            """)
+        
+        # Interpretasi Hasil
+        with st.expander("🔍 INTERPRETASI HASIL", expanded=False):
+            st.markdown("""
+            ### Memahami Output Sistem:
+            
+            #### 1. **Skor Asesmen Medis (0-100)**
+            - **0-30**: Penggunaan ringan, fungsi masih baik
+            - **31-60**: Kecanduan moderate, perlu intervensi
+            - **61-100**: Kecanduan severe, butuh rehabilitasi intensif
+            
+            #### 2. **Skor Asesmen Hukum (0-100)**
+            - **0-20**: Pengguna murni, tidak ada keterlibatan peredaran
+            - **21-40**: Ada indikasi sharing atau keterlibatan ringan
+            - **41-60**: Terlibat peredaran skala kecil-menengah
+            - **61-100**: Keterlibatan peredaran signifikan/bandar
+            
+            #### 3. **Composite Score**
+            Perhitungan: `(Skor Medis × 0.6) + (Skor Hukum × 0.4)`
+            - Bobot medis lebih besar (60%) karena fokus pada aspek kesehatan
+            - Bobot hukum 40% untuk mempertimbangkan aspek penegakan hukum
+            
+            #### 4. **Rekomendasi yang Mungkin:**
+            
+            **A. Rehabilitasi Rawat Jalan**
+            - Cocok untuk: Kecanduan ringan-sedang, masih produktif
+            - Frekuensi: 2-3x seminggu, bisa sambil kerja/sekolah
+            - Durasi: 3-6 bulan (bisa diperpanjang)
+            
+            **B. Rehabilitasi Rawat Inap**
+            - Cocok untuk: Kecanduan berat, tidak berfungsi sosial
+            - Program: Detox + terapi intensif 24/7
+            - Durasi: 3-12 bulan tergantung keparahan
+            
+            **C. Proses Hukum**
+            - Untuk: Terlibat peredaran, barang bukti besar
+            - Tidak dominan aspek kecanduan
+            - Fokus pada aspek penegakan hukum
+            
+            **D. Proses Hukum + Rehabilitasi (Dual Intervention)**
+            - Untuk: Pecandu berat yang juga terlibat peredaran
+            - Perlu menjalani rehabilitasi DAN proses hukum
+            - Pasal 103 UU 35/2009: Hakim dapat memerintahkan rehab sambil menjalani pidana
+            
+            #### 5. **Tingkat Keyakinan (Confidence Level)**
+            - **75-100%**: Rekomendasi sangat kuat
+            - **60-74%**: Rekomendasi kuat, perlu validasi tambahan
+            - **<60%**: Perlu evaluasi mendalam, kasus borderline
+            """)
+        
+        # Keterbatasan Sistem
+        with st.expander("⚠️ KETERBATASAN & DISCLAIMER", expanded=False):
+            st.markdown("""
+            ### Keterbatasan Sistem:
+            
+            #### Sistem INI TIDAK DAPAT:
+            
+            ❌ **Menggantikan penilaian klinis profesional**
+            - Dokter, psikolog, dan penegak hukum tetap yang menentukan
+            
+            ❌ **Menangkap nuansa kasus individual**
+            - Setiap kasus memiliki konteks unik
+            - Faktor budaya, keluarga, trauma tidak tercakup
+            
+            ❌ **Memprediksi masa depan dengan pasti**
+            - Hasil rehabilitasi dipengaruhi banyak faktor
+            - Motivasi individu sangat menentukan
+            
+            ❌ **Menggantikan keputusan hakim**
+            - Hakim memiliki kewenangan penuh
+            - Sistem hanya memberikan rekomendasi teknis
+            
+            #### Sistem INI HANYA:
+            
+            ✅ **Alat bantu** untuk strukturisasi data
+            ✅ **Referensi** untuk diskusi tim
+            ✅ **Dokumentasi** sistematis asesmen
+            ✅ **Basis** untuk case conference
+            
+            ### Disclaimer:
+            
+            1. **Tidak Mengikat Secara Hukum**
+               - Output sistem bersifat rekomendatif
+               - Keputusan final ada pada otoritas berwenang
+            
+            2. **Perlu Validasi Profesional**
+               - Setiap kasus harus direview oleh tim TAT
+               - Pertimbangkan faktor lain yang tidak tercakup
+            
+            3. **Update Berkala Diperlukan**
+               - Regulasi bisa berubah
+               - Sistem perlu disesuaikan dengan perkembangan hukum
+            
+            4. **Akurasi Tergantung Input**
+               - "Garbage in, garbage out"
+               - Pastikan data yang diinput akurat dan lengkap
+            
+            5. **Tidak untuk Screening Massal**
+               - Sistem dirancang untuk asesmen individual mendalam
+               - Bukan untuk screening cepat dalam jumlah besar
+            """)
+        
+        # FAQ
+        with st.expander("❓ FREQUENTLY ASKED QUESTIONS (FAQ)", expanded=False):
+            st.markdown("""
+            ### Pertanyaan yang Sering Diajukan:
+            
+            **Q1: Apakah sistem ini menggantikan peran TAT?**
+            
+            A: **TIDAK**. Sistem ini hanya alat bantu. Keputusan final tetap ada pada 
+            Tim Asesmen Terpadu yang terdiri dari profesional kesehatan dan penegak hukum.
+            
+            ---
+            
+            **Q2: Bagaimana jika hasil sistem berbeda dengan penilaian tim?**
+            
+            A: Penilaian tim TAT **SELALU lebih prioritas**. Sistem mungkin tidak menangkap 
+            faktor-faktor kontekstual yang penting. Gunakan hasil sistem sebagai salah satu 
+            pertimbangan, bukan kebenaran mutlak.
+            
+            ---
+            
+            **Q3: Apakah gramatur SEMA 4/2010 masih berlaku?**
+            
+            A: Ya, SEMA 4/2010 masih menjadi pedoman, namun hakim memiliki kewenangan 
+            untuk mempertimbangkan faktor lain. Sistem ini menggunakan gramatur tersebut 
+            sebagai referensi awal.
+            
+            ---
+            
+            **Q4: Bagaimana jika tersangka positif multiple substances?**
+            
+            A: Pilih semua zat yang terdeteksi positif. Sistem akan memberikan skor lebih 
+            tinggi untuk polisubstansi (≥4 zat) karena menunjukkan tingkat keparahan yang lebih tinggi.
+            
+            ---
+            
+            **Q5: Apa bedanya rawat jalan vs rawat inap?**
+            
+            A: 
+            - **Rawat Jalan**: Datang ke fasilitas rehab 2-3x/minggu, bisa sambil bekerja/sekolah. 
+              Cocok untuk kecanduan ringan-sedang dengan dukungan keluarga kuat.
+            - **Rawat Inap**: Tinggal di fasilitas rehab 24/7. Untuk kecanduan berat, 
+              komorbid serius, atau lingkungan rumah tidak mendukung.
+            
+            ---
+            
+            **Q6: Bagaimana dengan kasus first offender tapi barang bukti besar?**
+            
+            A: Sistem akan memberikan skor hukum tinggi karena barang bukti. Meskipun 
+            first offender, jika barang bukti jauh melebihi gramatur SEMA, indikasi 
+            peredaran lebih kuat. Tim TAT perlu evaluasi mendalam untuk kasus seperti ini.
+            
+            ---
+            
+            **Q7: Apakah sistem ini bisa digunakan untuk asesmen mandiri?**
+            
+            A: Sistem dirancang untuk **profesional** (dokter, psikolog, penyidik, jaksa). 
+            Tidak disarankan untuk asesmen mandiri karena perlu keahlian untuk interpretasi 
+            hasil dan pengambilan keputusan.
+            
+            ---
+            
+            **Q8: Bagaimana cara update kriteria jika ada perubahan regulasi?**
+            
+            A: Sistem rule-based ini mudah diupdate. Cukup modifikasi parameter scoring 
+            dan decision rules di kode. Tidak perlu retraining seperti sistem AI/ML.
+            
+            ---
+            
+            **Q9: Apakah data yang diinput disimpan?**
+            
+            A: Sistem ini **TIDAK menyimpan** data secara otomatis ke server. Data hanya 
+            ada di session browser. Anda bisa export hasil analisis dalam format JSON 
+            untuk dokumentasi internal.
+            
+            ---
+            
+            **Q10: Sistem ini bisa digunakan untuk kasus anak/remaja?**
+            
+            A: Kriteria umum bisa digunakan, tapi untuk anak/remaja perlu pertimbangan 
+            khusus sesuai UU Perlindungan Anak dan sistem peradilan anak. Konsultasikan 
+            dengan ahli hukum anak dan psikolog anak.
+            """)
+        
+        st.markdown("---")
+        
+        # Kontak & Referensi
+        st.markdown("""
+        ### 📚 REFERENSI & SUMBER:
+        
+        1. UU No. 35 Tahun 2009 tentang Narkotika
+        2. SEMA No. 4 Tahun 2010
+        3. Peraturan Bersama 7 Instansi No. 01/PB/MA/III/2014
+        4. Perka BNN No. 11 Tahun 2014
+        5. DSM-5 (Diagnostic and Statistical Manual of Mental Disorders, 5th Edition)
+        6. ASAM Criteria (American Society of Addiction Medicine)
+        7. WHO ASSIST (Alcohol, Smoking and Substance Involvement Screening Test)
+        
+        ### 📞 INFORMASI KONTAK:
+        
+        - **Hotline BNN**: 184
+        - **Website BNN**: https://bnn.go.id
+        - **IPWL BNN**: https://ipwl.bnn.go.id (Informasi Pusat Layanan)
+        
+        ---
+        
+        <div class="info-box">
+        <strong>💡 TIPS:</strong><br>
+        Gunakan sistem ini sebagai bagian dari proses asesmen komprehensif. 
+        Kombinasikan dengan wawancara mendalam, observasi klinis, dan pertimbangan 
+        kontekstual untuk menghasilkan rekomendasi terbaik bagi klien.
+        </div>
+        """, unsafe_allow_html=True)
 
-# ============================================================================
-# MENU 4: TENTANG SISTEM
-# ============================================================================
-else:  # Tentang Sistem
-    st.markdown('<p class="main-header">ℹ️ TENTANG SISTEM TAT-DSS</p>', unsafe_allow_html=True)
-    
-    st.markdown("""
-    ## 🎯 Tentang TAT Decision Support System
-    
-    **TAT-DSS (Tim Asesmen Terpadu - Decision Support System)** adalah sistem 
-    pendukung keputusan berbasis web yang dirancang untuk membantu Tim Asesmen 
-    Terpadu dalam melakukan asesmen cepat, objektif, dan akurat terhadap 
-    tersangka penyalahguna narkotika.
-    
-    ### 🚀 Fitur Utama
-    
-    1. **Asesmen Cepat & Terstruktur**
-       - Input data tersederhanakan
-       - Asesmen medis dan hukum terintegrasi
-       - Waktu pengisian: 5-10 menit
-    
-    2. **Algoritma Scoring Otomatis**
-       - Berbasis regulasi terbaru (KUHP Nasional, UU Penyesuaian Pidana)
-       - Mempertimbangkan 15+ faktor
-       - Hasil objektif dan konsisten
-    
-    3. **Rekomendasi Instant**
-       - Rehabilitasi vs Proses Hukum
-       - Detail program dan durasi
-       - Dasar hukum lengkap
-    
-    4. **Export & Dokumentasi**
-       - Generate PDF report otomatis
-       - Template dokumen resmi
-       - Database kasus untuk statistik
-    
-    5. **Dashboard Analitik**
-       - Statistik kasus real-time
-       - Visualisasi data
-       - Monitoring trend
-    
-    ### 📋 Metodologi
-    
-    Sistem ini dikembangkan berdasarkan:
-    - Penelusuran regulasi terbaru (2023-2025)
-    - Best practices internasional (Portugal, Switzerland, Canada)
-    - Konsultasi dengan praktisi hukum dan medis
-    - Prinsip evidence-based decision making
-    
-    ### ⚖️ Compliance Legal
-    
-    TAT-DSS sepenuhnya compliant dengan:
-    - UU No. 35 Tahun 2009 (Narkotika)
-    - UU No. 1 Tahun 2023 (KUHP Nasional)
-    - UU Penyesuaian Pidana (2025)
-    - Pedoman Jaksa Agung No. 18 Tahun 2021
-    - Peraturan Bersama 7 Instansi (2014)
-    
-    ### 🔒 Keamanan & Privasi
-    
-    - Data tersimpan lokal (tidak cloud)
-    - Enkripsi untuk data sensitif
-    - Access control berbasis role
-    - Compliance dengan UU Pelindungan Data Pribadi
-    
-    ### 👥 Tim Pengembang
-    
-    Dikembangkan oleh:
-    - Legal Expert (Hukum Pidana & Narkotika)
-    - Medical Expert (Addiction Medicine)
-    - Software Engineer (Full-stack Development)
-    - UX Designer
-    
-    ### 📞 Kontak & Support
-    
-    Untuk pertanyaan, saran, atau pelaporan bug:
-    - Email: support@tat-dss.id (contoh)
-    - WhatsApp: +62-XXX-XXXX-XXXX
-    - Website: www.tat-dss.id (contoh)
-    
-    ### 📄 Lisensi & Disclaimer
-    
-    **Lisensi**: Open Source (MIT License)
-    
-    **Disclaimer**: 
-    Sistem ini adalah ALAT BANTU untuk Tim Asesmen Terpadu. Keputusan 
-    akhir tetap menjadi tanggung jawab Tim TAT secara kolektif. Sistem 
-    ini tidak menggantikan pertimbangan profesional Tim Medis dan Tim Hukum.
-    
-    ### 🔄 Versi & Update
-    
-    **Versi Saat Ini**: 1.0.0 (Beta)  
-    **Tanggal Rilis**: Januari 2026  
-    **Update Terakhir**: [Auto-update]
-    
-    **Changelog:**
-    - v1.0.0: Initial release dengan fitur core
-    - [Future updates akan ditampilkan di sini]
-    
-    ### 🙏 Acknowledgments
-    
-    Terima kasih kepada:
-    - Badan Narkotika Nasional (BNN)
-    - Kementerian Hukum dan HAM
-    - Mahkamah Agung RI
-    - Kejaksaan Agung RI
-    - Kepolisian Negara RI
-    - Kementerian Kesehatan
-    - Seluruh praktisi dan akademisi yang berkontribusi
-    
-    ---
-    
-    **"Dari punishment menuju healing. Dari retribusi menuju rehabilitasi."**
-    """)
-    
-    # Version info
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.info("**Version**: 1.0.0 Beta")
-    with col2:
-        st.info("**Last Update**: Jan 2026")
-    with col3:
-        st.info("**License**: MIT")
+# =============================================================================
+# JALANKAN APLIKASI
+# =============================================================================
 
-# Footer
-st.markdown("---")
-st.markdown("""
-<div style='text-align: center; color: #888; font-size: 0.9rem;'>
-    <p><strong>TAT Decision Support System v1.0</strong> | © 2026 BNN | 
-    Developed with ❤️ for justice and humanity</p>
-    <p><em>"Rehabilitation, Not Criminalization"</em></p>
-</div>
-""", unsafe_allow_html=True)
+if __name__ == "__main__":
+    main()
